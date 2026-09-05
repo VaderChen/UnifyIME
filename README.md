@@ -50,6 +50,12 @@ src/unifyIME/
 
 歡迎透過 GitHub issue 回報可重現的輸入案例與功能建議。
 
+## 字庫授權聲明
+
+本專案的 `common_map.tsv` 與 `phrase_map.tsv` 含有取自並整理自 [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo) 公開字庫的資料。相關資料依 McBopomofo 的 [MIT License](https://github.com/openvanilla/McBopomofo/blob/master/LICENSE.txt) 使用與再散布，原始版權聲明為：Copyright (c) 2011-2026 Mengjuei Hsieh et al.
+
+上述字庫資料的授權與 UnifyIME 自身程式碼授權分開處理；UnifyIME 與 McBopomofo 沒有官方隸屬或背書關係。
+
 ## 參考與致謝
 
 本專案在輸入法架構、注音組字、游標行為與中英混打設計上，參考過以下的公開成果與使用經驗：
