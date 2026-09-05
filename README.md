@@ -49,3 +49,12 @@ src/unifyIME/
 ```
 
 歡迎透過 GitHub issue 回報可重現的輸入案例與功能建議。
+
+## 參考與致謝
+
+本專案在輸入法架構、注音組字、游標行為與中英混打設計上，曾參考以下中文輸入法的公開成果與使用經驗：
+
+- [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo)
+- [vChewing 威注音](https://github.com/vChewing/vChewing-macOS)
+
+感謝兩個專案長期累積的設計思考、實作經驗與文件，讓 UnifyIME 的開發少走了許多彎路，也更快釐清 macOS 輸入法在組字、候選與游標互動上的實際問題。
