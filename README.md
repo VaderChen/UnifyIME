@@ -52,7 +52,9 @@ src/unifyIME/
 
 ## 字庫授權聲明
 
-本專案的 `common_map.tsv` 與 `phrase_map.tsv` 含有取自並整理自 [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo) 公開字庫的資料。相關資料依 McBopomofo 的 [MIT License](https://github.com/openvanilla/McBopomofo/blob/master/LICENSE.txt) 使用與再散布，原始版權聲明為：Copyright (c) 2011-2026 Mengjuei Hsieh et al.
+本專案的 `common_map.tsv` 與 `phrase_map.tsv` 包含兩類資料：部分基礎字詞取自並整理自 [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo) 公開字庫；其餘詞條則由本專案依公開網路上觀察到的近期流行用詞與新生代名詞自行整理補充，不直接複製文章段落。
+
+取自 McBopomofo 的資料依其 [MIT License](https://github.com/openvanilla/McBopomofo/blob/master/LICENSE.txt) 使用與再散布，原始版權聲明為：Copyright (c) 2011-2026 Mengjuei Hsieh et al.
 
 上述字庫資料的授權與 UnifyIME 自身程式碼授權分開處理；UnifyIME 與 McBopomofo 沒有官方隸屬或背書關係。
 
