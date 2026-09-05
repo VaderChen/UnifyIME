@@ -7,7 +7,7 @@ PROJECT_ROOT="$SCRIPT_DIR"
 DIST_ROOT="$PROJECT_ROOT/dist"
 APP_NAME="全一輸入法.app"
 APP_SOURCE="$DIST_ROOT/$APP_NAME"
-BUILD_COMMAND="$PROJECT_ROOT/build.command"
+SOURCE_BUILD_SCRIPT="$PROJECT_ROOT/src/unifyIME/build.sh"
 PACK_STAGE=""
 BUILD_FIRST="false"
 
@@ -59,11 +59,11 @@ for command_name in hdiutil ditto mktemp; do
 done
 
 if [[ "$BUILD_FIRST" == "true" ]]; then
-  if [[ ! -x "$BUILD_COMMAND" ]]; then
-    print -u2 "錯誤：找不到可執行的 build.command：$BUILD_COMMAND"
+  if [[ ! -f "$SOURCE_BUILD_SCRIPT" ]]; then
+    print -u2 "錯誤：找不到專案建置腳本：$SOURCE_BUILD_SCRIPT"
     exit 1
   fi
-  zsh "$BUILD_COMMAND"
+  zsh "$SOURCE_BUILD_SCRIPT" --skip-sign --no-deploy
 fi
 
 if [[ -L "$DIST_ROOT" || ! -d "$DIST_ROOT" ]]; then
