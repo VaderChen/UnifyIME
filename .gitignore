@@ -1,0 +1,36 @@
+# Credentials and machine-local configuration
+/cert/
+/.claude/
+.env
+.env.*
+*.p8
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private input records, derived datasets, model weights, and reference checkouts
+/data/
+/artifacts/
+/refCode/
+/misc/
+**/Resources/Models/
+*.pt
+*.mlmodel
+*.mlpackage/
+*.mlmodelc/
+*user_selection_log*
+
+# Build outputs, backups, caches
+/bin/
+build/
+.build/
+notary-stage/
+*.app/
+*.zip
+*.bak
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+._*
