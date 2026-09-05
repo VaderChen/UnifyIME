@@ -82,11 +82,28 @@ private final class BasicSelectionWindowAppDelegate: NSObject, NSApplicationDele
     }
 }
 
-private func loadSentenceRerankerExample(from path: String) -> SentenceRerankerExample {
+private func loadSentenceRerankerExample(from path: String) throws -> SentenceRerankerExample {
     let url = URL(fileURLWithPath: path)
-    let data = (try? Data(contentsOf: url)) ?? Data()
+    let data = try Data(contentsOf: url)
     let decoder = JSONDecoder()
-    return try! decoder.decode(SentenceRerankerExample.self, from: data)
+    return try decoder.decode(SentenceRerankerExample.self, from: data)
+}
+
+private func reportCLIError(_ error: Error, path: String) -> Never {
+    fputs("error: unable to read or decode '\(path)': \(error.localizedDescription)\n", stderr)
+    exit(2)
+}
+
+private func loadActionBatchRows(from path: String) throws -> [[String: Any]] {
+    let text = try String(contentsOf: URL(fileURLWithPath: path), encoding: .utf8)
+    let lines = text.split(whereSeparator: \.isNewline)
+    guard !lines.isEmpty else { throw NSError(domain: "UnifyIMECLI", code: 1, userInfo: [NSLocalizedDescriptionKey: "input JSONL contains no rows"]) }
+    return try lines.enumerated().map { index, line in
+        guard let data = line.data(using: .utf8), let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw NSError(domain: "UnifyIMECLI", code: 2, userInfo: [NSLocalizedDescriptionKey: "invalid JSON object at line \(index + 1)"])
+        }
+        return object
+    }
 }
 
 private func defaultCLIOutputPath(_ name: String) -> String {
@@ -374,6 +391,15 @@ private func printJSONObjectLine(_ object: [String: Any]) -> Int32 {
 }
 
 func runUnifyIMEAppEntry() {
+    if CommandLine.arguments.dropFirst().first == "preferences-preview" {
+        let app = NSApplication.shared
+        let delegate = PreferencesPreviewAppDelegate()
+        app.setActivationPolicy(.regular)
+        app.delegate = delegate
+        app.run()
+        exit(0)
+    }
+
     if CommandLine.arguments.dropFirst().first == "install" {
         exit(installInputMethod())
     }
@@ -532,17 +558,11 @@ func runUnifyIMEAppEntry() {
             print("usage: ime-action-batch-replay <input.jsonl>")
             exit(2)
         }
-        let url = URL(fileURLWithPath: inputPath)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            print("failed to read \(inputPath)")
-            exit(2)
-        }
-        let rows: [[String: Any]] = text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return nil
-            }
-            return object
+        let rows: [[String: Any]]
+        do {
+            rows = try loadActionBatchRows(from: inputPath)
+        } catch {
+            reportCLIError(error, path: inputPath)
         }
         exit(imeActionBatchProbe(rows))
     }
@@ -553,17 +573,11 @@ func runUnifyIMEAppEntry() {
             print("usage: zh-ime-action-batch-replay <input.jsonl>")
             exit(2)
         }
-        let url = URL(fileURLWithPath: inputPath)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            print("failed to read \(inputPath)")
-            exit(2)
-        }
-        let rows: [[String: Any]] = text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return nil
-            }
-            return object
+        let rows: [[String: Any]]
+        do {
+            rows = try loadActionBatchRows(from: inputPath)
+        } catch {
+            reportCLIError(error, path: inputPath)
         }
         exit(imeActionBatchProbe(rows))
     }
@@ -574,17 +588,11 @@ func runUnifyIMEAppEntry() {
             print("usage: en-ime-action-batch-replay <input.jsonl>")
             exit(2)
         }
-        let url = URL(fileURLWithPath: inputPath)
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
-            print("failed to read \(inputPath)")
-            exit(2)
-        }
-        let rows: [[String: Any]] = text.split(whereSeparator: \.isNewline).compactMap { line in
-            guard let data = line.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return nil
-            }
-            return object
+        let rows: [[String: Any]]
+        do {
+            rows = try loadActionBatchRows(from: inputPath)
+        } catch {
+            reportCLIError(error, path: inputPath)
         }
         exit(englishActionBatchProbe(rows))
     }
@@ -911,7 +919,12 @@ func runUnifyIMEAppEntry() {
             print("usage: sentence-reranker-score <example.json>")
             exit(2)
         }
-        let example = loadSentenceRerankerExample(from: path)
+        let example: SentenceRerankerExample
+        do {
+            example = try loadSentenceRerankerExample(from: path)
+        } catch {
+            reportCLIError(error, path: path)
+        }
         let ranker = CoreMLSentenceReranker()
         let context = example.context ?? SentenceRerankerContext()
         let scored = example.candidates.map { candidate in
@@ -925,7 +938,12 @@ func runUnifyIMEAppEntry() {
         }.sorted { $0.finalScore > $1.finalScore }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .withoutEscapingSlashes]
-        let data = try! encoder.encode(scored)
+        let data: Data
+        do {
+            data = try encoder.encode(scored)
+        } catch {
+            reportCLIError(error, path: "sentence-reranker-score output")
+        }
         print(String(decoding: data, as: UTF8.self))
         exit(0)
     }
@@ -936,7 +954,12 @@ func runUnifyIMEAppEntry() {
             print("usage: sentence-reranker-probe <example.json>")
             exit(2)
         }
-        let example = loadSentenceRerankerExample(from: path)
+        let example: SentenceRerankerExample
+        do {
+            example = try loadSentenceRerankerExample(from: path)
+        } catch {
+            reportCLIError(error, path: path)
+        }
         let encoder = SentenceFeatureEncoder()
         let context = example.context ?? SentenceRerankerContext()
         for candidate in example.candidates {

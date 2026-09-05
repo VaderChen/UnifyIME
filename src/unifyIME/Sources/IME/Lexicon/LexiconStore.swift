@@ -65,6 +65,7 @@ struct LexiconStore {
 
         let cwd = URL(fileURLWithPath: fm.currentDirectoryPath, isDirectory: true)
         candidates.append(cwd.appendingPathComponent(relativePath))
+        candidates.append(cwd.appendingPathComponent("src/unifyIME/\(relativePath)"))
         candidates.append(cwd.appendingPathComponent("fastChIME/\(relativePath)"))
 
         var ancestor = cwd

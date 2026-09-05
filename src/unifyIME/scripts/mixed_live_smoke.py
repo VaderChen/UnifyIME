@@ -16,7 +16,7 @@ def resolve_workspace_root() -> Path:
 
 
 ROOT = resolve_workspace_root()
-APP = ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME"
+APP = Path(os.environ.get("UNIFYIME_CLI_PATH", str(ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME")))
 CASES = [
     ("pure-zh", "wu0fu4", "天氣", True),
     ("pure-en", "verygood", "very good", True),
@@ -87,7 +87,7 @@ CASES = [
 # per-keystroke path past the old 30-key limit. Other long cases are delivered
 # as one uninterrupted raw token so the regular smoke remains fast while still
 # validating final span materialization without artificial Enter boundaries.
-INCREMENTAL_LONG_CASES = {"long-zh-en", "long-everybody-verygood"}
+INCREMENTAL_LONG_CASES = {case_id for case_id, _, _, _ in CASES if case_id.startswith("long-")}
 
 
 def main() -> int:

@@ -23,7 +23,7 @@ def resolve_workspace_root() -> Path:
 
 
 ROOT = resolve_workspace_root()
-APP = ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME"
+APP = Path(os.environ.get("UNIFYIME_CLI_PATH", str(ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME")))
 CASE_FILE = ROOT / "src" / "unifyIME" / "tests" / "web_mixed_sentences.jsonl"
 MAX_MIXED_RAW_KEYS = 120
 DEFAULT_INCREMENTAL_CASES = {"ms-001", "apple-005", "mdn-002", "ibm-001"}

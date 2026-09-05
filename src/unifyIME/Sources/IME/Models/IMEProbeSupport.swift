@@ -411,6 +411,13 @@ final class IMEProbeEngine {
     }
 
     func handleStandaloneRawInput(rawChars: String, chars: String? = nil, keyCode: Int? = nil) {
+        if keyCode == nil, rawChars.count > 1 {
+            for scalar in rawChars {
+                let character = String(scalar)
+                handleStandaloneRawInput(rawChars: character, chars: character, keyCode: nil)
+            }
+            return
+        }
         let chars = chars ?? rawChars
         lastRawInput = "raw=\(rawChars) chars=\(chars) keyCode=\(keyCode.map(String.init) ?? "nil")"
         recentInputs.append(lastRawInput)
@@ -620,7 +627,7 @@ private func performIMEProbeAction(_ action: ProbeAction, on engine: IMEProbeEng
     case .enter:
         engine.pressEnter()
     case .esc:
-        engine.reset()
+        engine.handleStandaloneRawInput(rawChars: "", chars: "", keyCode: 53)
     case let .left(count):
         for _ in 0..<count { engine.moveLeft() }
     case let .right(count):
@@ -689,45 +696,45 @@ private func imeProbePayload(for engine: IMEProbeEngine) -> [String: Any] {
 }
 
 func imeActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
+    guard !rows.isEmpty else {
+        fputs("error: input JSONL contains no rows\n", stderr)
+        return 2
+    }
+    var hadError = false
+    var seenIDs = Set<String>()
     for row in rows {
-        let rowID = row["row_id"] as? String ?? UUID().uuidString
-        let tokens = row["row_keys"] as? [String] ?? []
+        guard let rowID = row["row_id"] as? String, !rowID.isEmpty,
+              let tokens = row["row_keys"] as? [String], !tokens.isEmpty else {
+            hadError = true
+            print("{\"row_id\":\"\(UUID().uuidString)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"row_id and non-empty row_keys are required\"}")
+            continue
+        }
+        if !seenIDs.insert(rowID).inserted {
+            hadError = true
+            print("{\"row_id\":\"\(rowID)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"duplicate row_id\"}")
+            continue
+        }
         let engine = IMEProbeEngine()
         var invalidToken: String?
         for token in tokens {
-            guard let action = parseIMEProbeAction(token) else {
-                invalidToken = token
-                break
-            }
+            guard let action = parseIMEProbeAction(token) else { invalidToken = token; break }
             performIMEProbeAction(action, on: engine)
         }
         var payload = imeProbePayload(for: engine)
         payload["row_id"] = rowID
         if let invalidToken {
+            hadError = true
             payload["error"] = "invalid action token: \(invalidToken)"
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
               let json = String(data: data, encoding: .utf8) else {
-            print("{\"row_id\":\"\(rowID)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"serialization failed\"}")
+            hadError = true
+            print("{\"row_id\":\"\(rowID)\",\"error\":\"serialization failed\"}")
             continue
         }
         print(json)
     }
-    if ProcessInfo.processInfo.environment["UNIFYIME_PROFILE_SUMMARY"] == "1" {
-        for metric in runtimeProfileSnapshots() {
-            let line = String(
-                format: "PROFILE %@ samples=%d average_ms=%.3f last_ms=%.3f\n",
-                metric.label,
-                metric.sampleCount,
-                metric.averageMs,
-                metric.lastMs
-            )
-            if let data = line.data(using: .utf8) {
-                try? FileHandle.standardError.write(contentsOf: data)
-            }
-        }
-    }
-    return 0
+    return hadError ? 2 : 0
 }
 
 private func parseIMEProbeAction(_ token: String) -> ProbeAction? {
@@ -741,19 +748,19 @@ private func parseIMEProbeAction(_ token: String) -> ProbeAction? {
         case "shift":
             return .shift(String(value))
         case "choose":
-            return .choose(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .choose(n)
         case "left":
-            return .left(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .left(n)
         case "right":
-            return .right(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .right(n)
         case "backspace":
-            return .backspace(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .backspace(n)
         case "delete":
-            return .delete(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .delete(n)
         case "up":
-            return .up(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .up(n)
         case "down":
-            return .down(max(1, Int(value) ?? 1))
+            guard let n = Int(value), n > 0 else { return nil }; return .down(n)
         default:
             break
         }
@@ -917,36 +924,34 @@ func englishActionScriptProbe(_ tokens: [String]) -> Int32 {
 }
 
 func englishActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
+    guard !rows.isEmpty else { fputs("error: input JSONL contains no rows\n", stderr); return 2 }
+    var hadError = false
+    var seenIDs = Set<String>()
     for row in rows {
-        let rowID = row["row_id"] as? String ?? UUID().uuidString
-        let tokens = row["row_keys"] as? [String] ?? []
+        guard let rowID = row["row_id"] as? String, !rowID.isEmpty,
+              let tokens = row["row_keys"] as? [String], !tokens.isEmpty else {
+            hadError = true
+            print("{\"row_id\":\"\(UUID().uuidString)\",\"error\":\"row_id and non-empty row_keys are required\"}")
+            continue
+        }
+        guard seenIDs.insert(rowID).inserted else {
+            hadError = true
+            print("{\"row_id\":\"\(rowID)\",\"error\":\"duplicate row_id\"}")
+            continue
+        }
         guard let engine = EnglishActionProbeEngine() else {
-            print("{\"row_id\":\"\(rowID)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"english target missing\"}")
+            hadError = true
+            print("{\"row_id\":\"\(rowID)\",\"error\":\"english target missing\"}")
             continue
         }
         var invalidToken: String?
         for token in tokens {
-            guard let action = parseIMEProbeAction(token) else {
-                invalidToken = token
-                break
-            }
+            guard let action = parseIMEProbeAction(token) else { invalidToken = token; break }
             engine.perform(action)
         }
-        var payload: [String: Any] = [
-            "row_id": rowID,
-            "text": engine.assertionText,
-            "readings": engine.assertionReadings,
-            "has_composition": engine.assertionHasComposition,
-        ]
-        if let invalidToken {
-            payload["error"] = "invalid action token: \(invalidToken)"
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let json = String(data: data, encoding: .utf8) else {
-            print("{\"row_id\":\"\(rowID)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"serialization failed\"}")
-            continue
-        }
-        print(json)
+        var payload: [String: Any] = ["row_id": rowID, "text": engine.assertionText, "readings": engine.assertionReadings, "has_composition": engine.assertionHasComposition]
+        if let invalidToken { hadError = true; payload["error"] = "invalid action token: \(invalidToken)" }
+        if let data = try? JSONSerialization.data(withJSONObject: payload, options: []), let json = String(data: data, encoding: .utf8) { print(json) } else { hadError = true; print("{\"row_id\":\"\(rowID)\",\"error\":\"serialization failed\"}") }
     }
-    return 0
+    return hadError ? 2 : 0
 }

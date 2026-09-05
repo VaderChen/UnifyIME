@@ -108,37 +108,10 @@ enum MixedCompositionResolver {
         }
         storeIncrementalAnalysis(analysis, for: rawBuffer)
 
-        let primaryCoveredRawLength: Int = {
-            let segmentRawLength = primarySegments.reduce(0) { partial, segment in
-                partial + effectiveRawLength(
-                    for: segment,
-                    primaryLanguageID: primaryLanguageID,
-                    primaryBehavior: primaryBehavior
-                )
-            }
-            if segmentRawLength > 0 { return segmentRawLength }
-            return primaryState.currentReading.count
-        }()
-        let primaryHasGarbage: Bool = {
-            if primarySegments.contains(where: { segment in
-                segment.value.unicodeScalars.contains { bopomofoGarbageSet.contains($0) }
-            }) {
-                return true
-            }
-            if primarySegments.isEmpty,
-               !primaryState.currentReading.isEmpty,
-               primaryState.currentReading.unicodeScalars.contains(where: { bopomofoGarbageSet.contains($0) }) {
-                return true
-            }
-            return false
-        }()
 
         let merge = analysis.merge
         let usesSecondaryTarget = merge.coverages.contains { $0.targetID != primaryTargetID }
-        let primaryFullyCoversBuffer = !prefersWholeEnglishSpan
-            && primaryCoveredRawLength >= rawBuffer.count
-            && !primaryHasGarbage
-        guard !primaryFullyCoversBuffer, merge.fullCoverage, usesSecondaryTarget else {
+        guard merge.fullCoverage, usesSecondaryTarget else {
             return MixedCompositionResolution(analysis: analysis, materializedState: nil)
         }
 

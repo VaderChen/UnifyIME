@@ -656,6 +656,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄨˇ": ["五"],
         "ㄌㄧㄡˋ": ["六"],
         "ㄑㄧ": ["七"],
+        "ㄑㄧˋ": ["氣"],
         "ㄅㄚ": ["八"],
         "ㄐㄧㄡˇ": ["九"],
         "ㄌㄜ˙": ["了"],

@@ -14,7 +14,7 @@ def resolve_root() -> Path:
 
 
 ROOT = resolve_root()
-APP = ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME"
+APP = Path(os.environ.get("UNIFYIME_CLI_PATH", str(ROOT / "bin" / "app" / "全一輸入法.app" / "Contents" / "MacOS" / "UnifyIME")))
 CASE_FILE = ROOT / "src" / "unifyIME" / "tests" / "regression_cases.jsonl"
 PROBE_BATCH_COMMANDS = {
     "zh": "zh-build-raw-input-batch",
@@ -198,7 +198,7 @@ def main() -> int:
         print(f"CATEGORY: {category}")
         print(f"SKIPPED:  unresolved reverse path")
         print(f"TARGET:   {sentence}")
-    return 0 if not failures else 2
+    return 0 if not failures and not skipped else 2
 
 
 if __name__ == "__main__":

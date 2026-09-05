@@ -1,21 +1,51 @@
-# FastChIME
+# UnifyIME
 
-macOS 中英連續輸入法（全一輸入法 / UnifyIME），包含候選排序、上下文預測與 Core ML listwise Transformer 訓練工具。
+UnifyIME（全一輸入法）是 macOS 中英連續輸入法，讓中文注音與英文單字可以在同一段文字中自然輸入，減少頻繁切換輸入法的干擾。
 
-## 開發
+## 產品特色
 
-需要 macOS、Xcode Command Line Tools。從 repository 根目錄執行：
+- 中文注音與英文混打：中文組字、英文單字與未完成英文前綴可連續輸入。
+- 智慧組字：根據輸入內容、前後文與片段狀態產生候選字詞。
+- 候選排序：支援規則式排序與 Core ML 模型，並保留 fallback 機制。
+- 流暢編輯：支援候選切換、左右移動、插入、Backspace、Delete、Escape、Enter 與 Space。
+- 連續輸入：保留組字狀態，支援不中斷的長句與多次中英切換。
+- 可調整設定：可在偏好設定中調整選字引擎、候選游標與停頓辨識。
+- 現代化設定介面：偏好設定採用 HTML、CSS 與 JavaScript，提供清楚的側欄與卡片式內容。
+- 多語言架構：中文與英文使用獨立 target 與詞庫，方便後續擴充其他語言。
+- CLI 測試工具：提供 selftest、批次輸入模擬、mixed smoke 與長句回歸測試。
 
-```sh
-./src/unifyIME/build.sh --skip-sign --no-deploy
+## 使用情境
+
+```text
+中文：    今天天氣很好
+中英混打：今天天氣 very good
+產品文字：請確認 input token 是否正常
 ```
 
-輸出位於 `bin/app/全一輸入法.app`。完整架構與測試說明見 [開發文件](doc/README.md)、[部署說明](doc/DEPLOY.md) 與 [Listwise 訓練](src/unifyIME/LISTWISE_TRANSFORMER.md)。
+輸入過程中可以直接繼續輸入英文、選字或移動游標，不必為每個語言片段單獨切換輸入法。
 
-## 私密資料與可攜性
+## 目前狀態
 
-- `cert/`、本機設定、真實選字紀錄、`data/`、`artifacts/`、模型權重、編譯產物與備份不提交。
-- 既有本機資料保留，不因 Git 排除而刪除；模型未包含於 repository，需自行訓練或放置，未載入模型時使用規則排序。
-- 專案路徑由腳本位置推導；使用者安裝目錄由 `$HOME` 推導。macOS 系統工具的標準路徑維持原樣。
-- 外部訓練資料以 `FASTCHIME_IME_DATA_ROOT` 指定。公證用 Keychain profile 以 `FASTCHIME_NOTARY_PROFILE` 指定，不在程式碼放入憑證。
-- 本機參考專案 `refCode/` 未納入提交。日後公開前仍應另行完成第三方程式碼及詞庫的授權盤點。
+UnifyIME 已具備完整的中文注音、英文輸入與中英混打主流程。候選 helper 視窗、長句組字、候選排序與不同 macOS 應用程式的實機相容性仍持續改善中。
+
+## 快速開始
+
+需要 macOS 與 Xcode Command Line Tools。建置 app：
+
+```sh
+zsh src/unifyIME/build.sh --skip-sign --no-deploy
+```
+
+建置結果位於 `bin/app/全一輸入法.app`。完整開發與部署說明請參考 [`doc/DEPLOY.md`](doc/DEPLOY.md)；功能現況請參考 [`doc/FEATURES.md`](doc/FEATURES.md)。
+
+## 專案結構
+
+```text
+src/unifyIME/
+├── Sources/       輸入法、組字與候選引擎
+├── Resources/     字庫、介面與 app 資源
+├── scripts/       測試、資料處理與模型工具
+└── tests/         回歸與長句測試案例
+```
+
+歡迎透過 GitHub issue 回報可重現的輸入案例與功能建議。

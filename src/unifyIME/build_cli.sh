@@ -9,7 +9,7 @@ BIN_PATH="$BIN_DIR/UnifyIMECLI"
 rm -rf "$BIN_DIR"
 mkdir -p "$BIN_DIR"
 
-SWIFT_SOURCES=("${(@f)$(find "$ROOT/Sources" "$WORKSPACE_ROOT/src/phoneticIME/Sources" -name '*.swift' | sort)}")
+SWIFT_SOURCES=("${(@f)$(find "$ROOT/Sources" "$WORKSPACE_ROOT/src/phoneticIME/Sources" "$WORKSPACE_ROOT/src/englishIME/Sources" -name '*.swift' | sort)}")
 
 swiftc \
   -D UNIFYIME_CLI \
@@ -20,6 +20,7 @@ swiftc \
   -framework Carbon \
   -framework CoreML \
   -framework InputMethodKit \
+  -framework WebKit \
   "${SWIFT_SOURCES[@]}" \
   -o "$BIN_PATH"
 

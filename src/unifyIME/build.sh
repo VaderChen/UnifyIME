@@ -130,6 +130,7 @@ swiftc \
   -framework Carbon \
   -framework CoreML \
   -framework InputMethodKit \
+  -framework WebKit \
   "${SWIFT_FLAGS[@]}" \
   "${SWIFT_SOURCES[@]}" \
   -o "$BIN_DIR/$MODULE_NAME"
@@ -141,6 +142,10 @@ cp "$ROOT/Resources/phrase_map.tsv" "$RES_DIR/phrase_map.tsv"
 cp "$ROOT/Resources/Base.lproj/InfoPlist.strings" "$RES_DIR/Base.lproj/InfoPlist.strings"
 cp "$ROOT/Resources/en.lproj/InfoPlist.strings" "$RES_DIR/en.lproj/InfoPlist.strings"
 cp "$ROOT/Resources/zh-Hant.lproj/InfoPlist.strings" "$RES_DIR/zh-Hant.lproj/InfoPlist.strings"
+if [[ -d "$ROOT/Resources/Preferences" ]]; then
+  mkdir -p "$RES_DIR/Preferences"
+  ditto "$ROOT/Resources/Preferences" "$RES_DIR/Preferences"
+fi
 
 if [[ -d "$WORKSPACE_ROOT/src/englishIME/Resources" ]]; then
   find "$WORKSPACE_ROOT/src/englishIME/Resources" -type f ! -name '._*' | while read -r resource; do
