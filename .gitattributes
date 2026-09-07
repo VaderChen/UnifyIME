@@ -1,0 +1,4 @@
+# 模型與權重以二進位保存，避免文字差異與換行轉換。
+*.mlmodel binary
+*.pt binary
+*.bin binary

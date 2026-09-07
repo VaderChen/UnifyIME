@@ -1,0 +1,54 @@
+# Credentials and machine-local configuration
+/cert/
+/.claude/
+.env
+.env.*
+*.p8
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Private input records, derived datasets, model weights, and reference checkouts
+/data/
+/artifacts/
+/refCode/
+/misc/
+**/Resources/Models/
+*.pt
+*.mlmodel
+*.mlpackage/
+*.mlmodelc/
+*user_selection_log*
+
+# Build outputs, backups, caches
+/bin/
+build/
+.build/
+notary-stage/
+*.app/
+*.zip
+*.bak
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+._*
+
+# Machine-local runs, installer output, and versioned backup suffixes
+/temp/
+/dist/
+*.bak*
+
+# Local reports and historical investigation notes
+/doc/test-results/
+/doc/測試報告_*.md
+/doc/FastCHIME演算法與架構分析.md
+
+# Published inference artifacts only
+!/models/CandidateRanker.mlpackage/
+!/models/CandidateRanker.mlpackage/**
+!/models/ranker_checkpoint.pt
+
+# 本機發布設定，不納入 GitHub
+/pack.command

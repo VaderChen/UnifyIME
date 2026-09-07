@@ -1,0 +1,348 @@
+è
+
+features
+*
+X†ÄR
+score
+*
+†Ä¢ﬁ¢:
+,com.github.apple.coremltools.conversion_date
+2026-09-06¢:
++com.github.apple.coremltools.source_dialectTorchScript¢+
+$com.github.apple.coremltools.version9.0¢3
+#com.github.apple.coremltools.sourcetorch==2.8.0≤¸è
+mainÜ
+
+features
+
+
+XCoreML5⁄
+CoreML5Œscoret
+const 
+features_to_fp16_dtype_0
+*
+val
+
+
+"
+fp16*.
+name&
+
+"
+features_to_fp16_dtype_0¢
+const+
+net_0_weight_to_fp16
+
+
+Ä
+X*@
+val9
+
+
+Ä
+X*"
+@model_path/weights/weight.bin@**
+name"
+
+"
+net_0_weight_to_fp16î
+const#
+net_0_bias_to_fp16
+
+
+Ä*<
+val5
+
+
+Ä*$
+@model_path/weights/weight.binÄ±*(
+name 
+
+"
+net_0_bias_to_fp16Ü
+cast%
+dtype
+
+features_to_fp16_dtype_0
+x
+
+
+features&
+features_to_fp16
+
+
+
+X*
+name
+
+
+"
+cast_1º
+linear"
+weight
+
+net_0_weight_to_fp16
+bias
+
+net_0_bias_to_fp16
+x
+
+features_to_fp16)
+linear_0_cast_fp16
+
+
+
+Ä*(
+name 
+
+"
+linear_0_cast_fp16v
+relu
+x
+
+linear_0_cast_fp16(
+input_3_cast_fp16
+
+
+
+Ä*'
+name
+
+"
+input_3_cast_fp16§
+const+
+net_2_weight_to_fp16
+
+
+@
+Ä*B
+val;
+
+
+@
+Ä*$
+@model_path/weights/weight.bin¿≥**
+name"
+
+"
+net_2_weight_to_fp16í
+const"
+net_2_bias_to_fp16
+
+
+
+@*;
+val4
+
+
+
+@*$
+@model_path/weights/weight.binÄ¥*(
+name 
+
+"
+net_2_bias_to_fp16º
+linear"
+weight
+
+net_2_weight_to_fp16
+bias
+
+net_2_bias_to_fp16
+x
+
+input_3_cast_fp16(
+linear_1_cast_fp16
+
+
+
+@*(
+name 
+
+"
+linear_1_cast_fp16u
+relu
+x
+
+linear_1_cast_fp16'
+input_7_cast_fp16
+
+
+
+@*'
+name
+
+"
+input_7_cast_fp16¢
+const*
+net_4_weight_to_fp16
+
+
+ 
+@*A
+val:
+
+
+ 
+@*$
+@model_path/weights/weight.bin¿µ**
+name"
+
+"
+net_4_weight_to_fp16í
+const"
+net_4_bias_to_fp16
+
+
+
+ *;
+val4
+
+
+
+ *$
+@model_path/weights/weight.binÄ÷*(
+name 
+
+"
+net_4_bias_to_fp16º
+linear"
+weight
+
+net_4_weight_to_fp16
+bias
+
+net_4_bias_to_fp16
+x
+
+input_7_cast_fp16(
+linear_2_cast_fp16
+
+
+
+ *(
+name 
+
+"
+linear_2_cast_fp16q
+relu
+x
+
+linear_2_cast_fp16%
+input_cast_fp16
+
+
+
+ *%
+name
+
+"
+input_cast_fp16¢
+const*
+net_6_weight_to_fp16
+
+
+
+ *A
+val:
+
+
+
+ *$
+@model_path/weights/weight.binÄ◊**
+name"
+
+"
+net_6_weight_to_fp16v
+const"
+net_6_bias_to_fp16
+
+
+
+*
+val
+
+
+
+
+:
+E•*(
+name 
+
+"
+net_6_bias_to_fp16∫
+linear"
+weight
+
+net_6_weight_to_fp16
+bias
+
+net_6_bias_to_fp16
+x
+
+input_cast_fp16(
+linear_3_cast_fp16
+
+
+
+*(
+name 
+
+"
+linear_3_cast_fp16à
+const*
+"linear_3_cast_fp16_to_fp32_dtype_0
+*
+val
+
+
+"
+fp32*8
+name0
+(
+&"$
+"linear_3_cast_fp16_to_fp32_dtype_0è
+cast/
+dtype&
+$
+"linear_3_cast_fp16_to_fp32_dtype_0
+x
+
+linear_3_cast_fp16
+score
+
+
+*
+name
+
+
+"
+cast_0"Â
+	buildInfo◊"
+
+
+ƒ"¡
+6
+!
+
+"
+coremltools-version
+	
+"
+9.0
+@
+)
+!
+"
+coremltools-component-torch
+
+	"
+2.8.0
+E
+(
+ 
+"
+coremltools-source-dialect
+
+"
+TorchScript

@@ -1,0 +1,4 @@
+{
+  "expected_dimension": 88,
+  "model_architecture": "dense_mlp_v2"
+}

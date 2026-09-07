@@ -1,0 +1,142 @@
+# UnifyIME｜全一輸入法
+
+全一輸入法是 macOS 中英連續輸入法，讓繁體中文注音與英文單字在同一段文字中連續輸入。從組字、選字到中間插入與修改，都可以在送出文字前完成。
+
+## 功能特色
+
+- **中英混打**：支援標準注音、英文單字與未完成英文前綴，減少切換輸入法的次數。
+- **上下文選字**：以傳統詞庫與組字規則為基礎，搭配可載入的 NN 模型輔助候選排序。
+- **組字內編輯**：可移動游標、插入文字、向前或向後刪除，再繼續輸入。
+- **保留選字結果**：單純移動游標保留正文；插入或刪除時同步調整後方已確認詞彙的位置。
+- **個人詞頻**：依明確選字累積偏好，自動提交不計為選字偏好。
+- **可調整的候選焦點**：提供靠左、靠右與左右皆偵測三種模式。
+- **偏好設定**：可調整停頓辨識、輸入語言及候選焦點，並查看版本資訊。
+
+## 安裝與啟用
+
+適用於 macOS 13 或更新版本。請從 [GitHub Releases](https://github.com/VaderChen/UnifyIME/releases) 選擇符合 Mac 架構的 DMG：`arm64` 為 Apple 晶片，`x86_64` 為 Intel；實際提供的版本以發布頁附件為準。
+
+1. 開啟下載的 DMG。
+2. 雙擊帶有全一輸入法圖示的 **「安裝全一輸入法」**，程式會自動安裝並啟動輸入法。
+3. 首次使用時，按「開啟鍵盤設定」，在 macOS 的輸入來源中加入 **「全一輸入法」**。
+4. 從系統輸入法選單切換至全一輸入法，即可開始輸入。
+
+安裝位置為 `~/Library/Input Methods/全一輸入法.app`，只安裝到目前使用者，不需要管理員密碼。若輸入來源清單尚未出現全一輸入法，請登出後重新登入。
+
+更新時執行新版 DMG 內的同一個安裝程式即可。安裝程式會先備份舊版，完成後重新載入輸入法；安裝失敗時嘗試還原。個人詞頻與偏好設定會保留。
+
+## 基本操作
+
+以下按鍵作用於尚未送出的組字內容。
+
+| 按鍵 | 功能 |
+| --- | --- |
+| ←／→ | 在組字內移動游標 |
+| Home／End | 移到整段組字開頭／結尾 |
+| ↑／↓ | 開啟候選清單，再按可切換候選 |
+| Backspace | 刪除游標左側 |
+| Delete | 刪除游標右側 |
+| Space | 完成目前音節；沒有待完成音節時，確認候選並前進，抵達末尾時送出 |
+| Enter | 候選清單開啟時先確認選字；一般組字狀態下送出整段文字 |
+| Escape | 回復前一步組字操作 |
+
+Home／End 遇到未完成的注音時，會先在原位置完成該音節，再移動游標，不直接送出整段文字。刪除操作以鍵盤送出的標準 Delete／Backspace 鍵碼區分，不另外提供刪除組合鍵。
+
+## 選字設定
+
+### 選字引擎
+
+目前正式支援 **「傳統優先＋AI 輔助」**。其餘模式在設定中列為「未支援」，顯示灰色且不可選取。
+
+| 狀態 | 模式 |
+| --- | --- |
+| 已支援 | 傳統優先＋AI 輔助 |
+| 未支援 | AI 優先＋傳統輔助、AI 先決、傳統模式 |
+
+NN 用於輔助既有候選排序。未載入模型或模型不可用時，程式自動使用規則式排序，仍可正常輸入；這項回退行為不代表另開放「傳統模式」選項。模型成品與載入方式請參考 [模型說明](models/README.md)。
+
+### 選字游標
+
+| 模式 | 行為 |
+| --- | --- |
+| 靠左 | 以游標左側字詞作為候選焦點 |
+| 靠右 | 以游標右側字詞作為候選焦點 |
+| 左右皆偵測 (準確率稍降) | 交錯提供兩側候選，選取後替換該候選對應的範圍 |
+
+在組字開頭或結尾，使用有效的一側。雙側模式提供較多選字範圍，但也增加候選歧義。
+
+## 使用範圍
+
+目前提供繁體中文注音與英文混打。日文選項暫停開放，固定為「不使用」。短句、缺少上下文及同音詞仍可能需要手動選字；候選視窗與不同 macOS 應用程式的相容性持續改善中。
+
+問題與建議可透過 [GitHub Issues](https://github.com/VaderChen/UnifyIME/issues) 回報。請附上 macOS／輸入法版本、使用的應用程式、原始按鍵、游標位置，以及預期與實際文字，方便重現。
+
+## 從原始碼建置
+
+需要 macOS 與 Xcode Command Line Tools。在專案根目錄執行：
+
+```sh
+zsh build.command --release
+```
+
+產物位於 `dist/全一輸入法.app`，不會自動覆蓋本機輸入法。若要建置並安裝至本機：
+
+```sh
+zsh build.command --release --sign --deploy
+```
+
+發布者本機另有 `pack.command`，含個人簽章與公證設定，不隨 GitHub 原始碼提供。以下指令僅適用於已備妥該本機工具的環境。
+
+建立供發布的一鍵安裝 DMG：
+
+```sh
+zsh pack.command
+```
+
+封裝腳本預設重新建置 release，依序簽署並公證輸入法、安裝程式及 DMG，產出 DMG 與 SHA-256 校驗檔。需要 Developer ID Application 憑證及可用的 notarytool 鑰匙圈設定。
+
+```sh
+UNIFYIME_NOTARY_PROFILE="你的公證設定名稱" zsh pack.command
+```
+
+可用 `--arch=arm64` 或 `--arch=x86_64` 指定架構，`--no-build` 使用 `dist` 中既有的 app。其餘參數請執行 `zsh pack.command --help`。設定 `UNIFYIME_SKIP_NOTARIZE=1` 只會產生檔名標示 `LOCAL-ONLY` 的本機用途版本。
+
+## 程式與文件
+
+| 路徑 | 內容 |
+| --- | --- |
+| `src/unifyIME/Sources/` | macOS 整合、組字狀態、候選排序與設定介面 |
+| `src/phoneticIME/` | 中文注音引擎 |
+| `src/englishIME/` | 英文引擎與詞庫 |
+| `src/unifyIME/Resources/` | 字庫、設定介面與 app 資源 |
+| `scripts/installer/` | 一鍵安裝程式 |
+| `models/` | NN 模型成品與載入說明 |
+
+- [功能說明](doc/FEATURES.md)
+- [程式架構](doc/README.md)
+- [建置與部署](doc/DEPLOY.md)
+
+## 字庫授權聲明
+
+本專案的 `common_map.tsv` 與 `phrase_map.tsv` 包含兩類資料：部分基礎字詞取自並整理自 [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo) 公開字庫；其餘詞條則由本專案依公開網路上觀察到的近期流行用詞與新生代名詞自行整理補充，不直接複製文章段落。
+
+取自 McBopomofo 的資料依其 [MIT License](https://github.com/openvanilla/McBopomofo/blob/master/LICENSE.txt) 使用與再散布，原始版權聲明為：Copyright (c) 2011-2026 Mengjuei Hsieh et al.
+
+上述字庫資料的授權與 UnifyIME 自身程式碼授權分開處理；UnifyIME 與 McBopomofo 沒有官方隸屬或背書關係。
+
+## 參考與致謝
+
+本專案在輸入法架構、注音組字、游標行為與中英混打設計上，參考過以下的公開成果與使用經驗：
+
+- [小麥注音（McBopomofo）](https://github.com/openvanilla/McBopomofo)
+- [唯音輸入法（vChewing）](https://github.com/vChewing/vChewing-macOS)
+
+感謝兩個專案長期累積的設計思考、實作經驗與文件，讓 UnifyIME 的開發少走了許多彎路，也更快釐清 macOS 輸入法在組字、候選與游標互動上的實際問題。
+
+## 發布版號
+
+版本以建置產生的 `1.YY.MMDD build HHmm` 為準（台北時間）。程式介面、安裝程式與 DMG 共用 app 內的 `UnifyIMEBuildVersion`；封裝不另產生版本。GitHub 標籤使用 `v1.YY.MMDD-build-HHmm`，DMG 使用 `UnifyIME-1.YY.MMDD-build-HHmm-架構.dmg`。`--no-build` 會沿用既有 app 的 BUILD 版號；舊產物若未包含版號欄位，需先重新建置。
+
+## 產物目錄清理
+
+每次執行 BUILD 或 PACK，都會在產生新版前清空 `dist/`，包含舊 app、DMG、校驗檔及隱藏檔。`pack.command --no-build` 會先將既有 app 暫存至 `dist/` 外，再清空目錄並保留本次 app，避免刪除封裝來源。需要保存的歷史版本請先移至其他目錄。

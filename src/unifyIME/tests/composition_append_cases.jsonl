@@ -1,0 +1,15 @@
+{"name": "正常", "raw": "5/4t;6", "expected": "正常"}
+{"name": "正常了", "raw": "5/4t;6xk7", "expected": "正常了", "checkpoints": {"6": "正常", "7": "正常ㄌ", "8": "正常ㄌㄜ", "9": "正常了"}}
+{"name": "不正常了", "raw": "1j65/4t;6xk7", "expected": "不正常了", "checkpoints": {"9": "不正常", "12": "不正常了"}}
+{"name": "正常的", "raw": "5/4t;62k7", "expected": "正常的"}
+{"name": "正確了", "raw": "5/4fm,4xk7", "expected": "正確了"}
+{"name": "正在使用", "raw": "5/4y94g3m/4", "expected": "正在使用"}
+{"name": "已經完成了", "raw": "u3ru/j06t/6xk7", "expected": "已經完成了"}
+{"name": "曾經使用", "raw": "h/6ru/g3m/4", "expected": "曾經使用"}
+{"name": "將來", "raw": "ru;x96", "expected": "將來"}
+{"name": "再見", "raw": "y94ru04", "expected": "再見"}
+{"name": "變長了", "raw": "1u04t;6xk7", "expected": "變長了"}
+{"name": "我現在可以正常處理這個輸入法", "raw": "jivu04y94dk3u35/4t;6tj3xu35k4ek7gjbj4z83", "expected": "我現在可以正常處理這個輸入法"}
+{"name": "我看起來已經很穩定了", "raw": "ji3d04fu3x96u3ru/cp3jp32u/4xk7", "expected": "我看起來已經很穩定了"}
+{"name": "再檢查", "raw": "y94ru03t86", "expected": "再檢查"}
+{"name": "三聲以", "raw": "u3", "expected": "以"}
