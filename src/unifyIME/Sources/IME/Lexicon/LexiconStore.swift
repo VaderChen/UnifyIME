@@ -105,43 +105,25 @@ struct LexiconStore {
         var merged: [String] = []
         var seen = Set<String>()
         appendCandidates(forReading: buffer, into: &merged, seen: &seen)
-        let neutralNormalized = neutralToneNormalizedReading(buffer)
-        if neutralNormalized != buffer {
-            appendCandidates(forReading: neutralNormalized, into: &merged, seen: &seen)
-        }
-        let normalized = normalizeReading(buffer)
-        if normalized != buffer {
-            appendCandidates(forReading: normalized, into: &merged, seen: &seen)
-        }
-        let shouldUseToneFallbacks = isSingleSyllableReading(buffer) && merged.count <= 2
-        if shouldUseToneFallbacks && !containsToneMark(buffer) {
-            let toneExpandedReadings = toneExpandedVariants(for: buffer)
-            for reading in toneExpandedReadings {
-                appendCandidates(forReading: reading, into: &merged, seen: &seen, limit: 2)
-                if merged.count >= lexiconRecallLimit {
-                    break
+        // 明確聲調（含輕聲）是查詢條件，不能去調、跨調或以近音補字。
+        // 未標聲調沿用原本的補候選規則，避免改變尚在輸入中的行為。
+        if !containsToneMark(buffer) {
+            if isSingleSyllableReading(buffer), merged.count <= 2 {
+                for reading in toneExpandedVariants(for: buffer) {
+                    appendCandidates(forReading: reading, into: &merged, seen: &seen, limit: 2)
+                    if merged.count >= lexiconRecallLimit { break }
                 }
             }
-        } else if shouldUseToneFallbacks {
-            for reading in siblingToneVariants(for: buffer) {
-                appendCandidates(forReading: reading, into: &merged, seen: &seen, limit: 2)
-                if merged.count >= lexiconRecallLimit {
-                    break
-                }
-            }
-        }
-        if isSingleSyllableReading(normalized != buffer ? normalized : buffer), merged.count <= 1 {
-            let variants = neighborReadingVariants(for: normalized != buffer ? normalized : buffer)
-            for variant in variants {
-                appendCandidates(forReading: variant, into: &merged, seen: &seen, limit: 2)
-                if merged.count >= lexiconRecallLimit {
-                    break
+            if isSingleSyllableReading(buffer), merged.count <= 1 {
+                for variant in neighborReadingVariants(for: buffer) {
+                    appendCandidates(forReading: variant, into: &merged, seen: &seen, limit: 2)
+                    if merged.count >= lexiconRecallLimit { break }
                 }
             }
         }
         let filtered = merged.filter(Self.isDisplayableCandidate(_:))
         var resolved = filtered.isEmpty ? (merged.isEmpty ? [buffer] : merged) : filtered
-        if isSingleSyllableReading(buffer) || isSingleSyllableReading(normalized != buffer ? normalized : buffer) {
+        if isSingleSyllableReading(buffer) {
             let singles = resolved.filter { $0.count == 1 }
             let longer = resolved.filter { $0.count > 1 }
             if !singles.isEmpty {
@@ -172,20 +154,12 @@ struct LexiconStore {
         reading.unicodeScalars.filter { !Self.toneMarks.contains($0) }.map(String.init).joined()
     }
 
-    func neutralToneNormalizedReading(_ reading: String) -> String {
-        reading.replacingOccurrences(of: "˙", with: "")
-    }
-
     func containsToneMark(_ reading: String) -> Bool {
         reading.unicodeScalars.contains { Self.toneMarks.contains($0) }
     }
 
     func canExtendToLongerPhrase(_ reading: String) -> Bool {
-        if readingPrefixes.contains(reading) {
-            return true
-        }
-        let normalized = normalizeReading(reading)
-        return normalized != reading && readingPrefixes.contains(normalized)
+        readingPrefixes.contains(reading)
     }
 
     static func isDisplayableCandidate(_ candidate: String) -> Bool {
@@ -372,23 +346,6 @@ struct LexiconStore {
         guard !reading.isEmpty, !containsToneMark(reading) else { return [] }
         let tones: [Character] = ["ˇ", "ˋ", "ˊ", "˙"]
         return tones.map { reading + String($0) }
-    }
-
-    private func siblingToneVariants(for reading: String) -> [String] {
-        guard let toneIndex = reading.lastIndex(where: { scalar in
-            scalar.unicodeScalars.contains { Self.toneMarks.contains($0) }
-        }) else {
-            return []
-        }
-
-        let base = String(reading[..<toneIndex])
-        let currentTone = reading[toneIndex]
-        let tones: [Character] = ["ˇ", "ˋ", "ˊ", "˙"]
-        var variants = [base]
-        for tone in tones where tone != currentTone {
-            variants.append(base + String(tone))
-        }
-        return variants
     }
 
     private func isSingleSyllableReading(_ reading: String) -> Bool {
