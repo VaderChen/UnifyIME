@@ -75,7 +75,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 
 逐詞來源位於 `lexicons/imported_entries.jsonl`，來源版本與雜湊位於 `lexicons/import_manifest.json`。重新匯入只移除工具前次產生且未被修改的完整行；若偵測到人工修改或移除，停止處理。原始下載快照保留於本機 `data/lexicon-import/`。操作及授權請參考 [開放詞庫說明](../lexicons/README.md)。
 
-`SymbolCandidates` 統一管理標點快捷鍵與同類變體。符號保留在共用組字狀態內，候選沿用既有替換與復原流程；尚未提交前，可移回符號位置重新選取。Ctrl／Cmd 的攔截僅限指定標點鍵，其餘快捷鍵交給應用程式。
+`SymbolCandidates` 統一管理符號候選與同類變體。符號保留在共用組字狀態內，候選沿用既有替換與復原流程；尚未提交前，可移回符號位置重新選取。Shift 符號輸入依鍵盤產生的字元查詢對照表，再透過共用組字流程插入。
 
 ## 模型與設定
 
