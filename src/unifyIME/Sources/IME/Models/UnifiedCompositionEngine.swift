@@ -15,12 +15,81 @@ struct UnifiedCompositionState {
     var selectedCandidateIndex = 0
     var segmentOverrides: [CompositionSegmentKey: String] = [:]
     var explicitLockedKeys = Set<CompositionSegmentKey>()
+    var automaticLockedKeys = Set<CompositionSegmentKey>()
+    var readingRawInputs: [String] = []
+    var pendingRawInput = ""
+
+    var protectedKeys: Set<CompositionSegmentKey> { explicitLockedKeys.union(automaticLockedKeys) }
+
+    static func sourceInput(for reading: String) -> String {
+        let inverse = SessionCtl.inverseBopomofoMap()
+        return reading.map { inverse[String($0)] ?? String($0) }.joined()
+    }
+
+    /// 舊呼叫端直接建立讀音時使用鍵位映射；實際輸入路徑優先使用保存的來源。
+    var sourceInputs: [String] {
+        guard readingRawInputs.count == allReadings.count else {
+            return allReadings.map(Self.sourceInput(for:))
+        }
+        return readingRawInputs
+    }
+
+    func inputSpan(for key: CompositionSegmentKey) -> CompositionInputSpan? {
+        guard key.start >= 0, key.length > 0, key.start + key.length <= allReadings.count else { return nil }
+        guard allReadings[key.start..<(key.start + key.length)].joined() == key.reading else { return nil }
+        let cursor = currentCompositionCursorIndex()
+        guard currentReading.isEmpty || key.start >= cursor || key.start + key.length <= cursor else { return nil }
+        let units = sourceInputs
+        let raw = units[key.start..<(key.start + key.length)].joined()
+        let pendingLength = pendingRawInput.isEmpty ? Self.sourceInput(for: currentReading).count : pendingRawInput.count
+        let start = units.prefix(key.start).reduce(0) { $0 + $1.count }
+            + (!currentReading.isEmpty && key.start >= currentCompositionCursorIndex() ? pendingLength : 0)
+        return CompositionInputSpan(start: start, end: start + raw.count, input: raw)
+    }
+
+    mutating func invalidateAutomaticDecisions() {
+        for key in automaticLockedKeys where !explicitLockedKeys.contains(key) {
+            segmentOverrides.removeValue(forKey: key)
+        }
+        automaticLockedKeys = []
+    }
+
+    func attachSources(to presentation: CompositionPresentationState) -> CompositionPresentationState {
+        func annotate(_ segment: ComposedSegment, preview: Bool = false) -> ComposedSegment {
+            var result = segment
+            let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
+            result.inputSpan = inputSpan(for: key)
+            result.confirmation = preview ? .preview : (explicitLockedKeys.contains(key) ? .confirmed : .inferred)
+            return result
+        }
+        let previewKey = selectedCandidateIndex > 0 && presentation.candidateEntries.indices.contains(selectedCandidateIndex)
+            ? presentation.candidateEntries[selectedCandidateIndex].replacementKey : nil
+        let entries = presentation.candidateEntries.map { entry -> CandidateEntry in
+            var result = entry
+            result.inputSpan = inputSpan(for: entry.replacementKey)
+            return result
+        }
+        return CompositionPresentationState(baseSegments: presentation.baseSegments.map { annotate($0) },
+            displayedSegments: presentation.displayedSegments.map { segment in
+                let preview = previewKey.map { segment.start < $0.start + $0.length && $0.start < segment.start + segment.length } ?? false
+                return annotate(segment, preview: preview)
+            },
+            focusedSegment: presentation.focusedSegment.map { annotate($0) }, candidateEntries: entries,
+            cursorLocation: presentation.cursorLocation, markedText: presentation.markedText,
+            debugText: presentation.debugText, focusInfo: presentation.focusInfo)
+    }
 
     /// 編輯音節時同步搬移後方鎖定，交錯的詞彙則重新解碼。
-    mutating func rebaseOverrides(replacing range: Range<Int>, insertedCount: Int) {
+    mutating func rebaseOverrides(replacing range: Range<Int>, insertedCount: Int, insertedRawInputs: [String]? = nil) {
+        var inputs = sourceInputs
+        if range.lowerBound >= 0, range.upperBound <= inputs.count {
+            inputs.replaceSubrange(range, with: insertedRawInputs ?? Array(repeating: "", count: insertedCount))
+            readingRawInputs = inputs
+        }
         let delta = insertedCount - range.count
         var overrides: [CompositionSegmentKey: String] = [:]
         var locks = Set<CompositionSegmentKey>()
+        var automatic = Set<CompositionSegmentKey>()
         for (key, value) in segmentOverrides {
             let end = key.start + key.length
             let newStart: Int
@@ -34,9 +103,11 @@ struct UnifiedCompositionState {
             let updated = CompositionSegmentKey(start: newStart, length: key.length, reading: key.reading)
             overrides[updated] = value
             if explicitLockedKeys.contains(key) { locks.insert(updated) }
+            if automaticLockedKeys.contains(key) { automatic.insert(updated) }
         }
         segmentOverrides = overrides
         explicitLockedKeys = locks
+        automaticLockedKeys = automatic
     }
 
     var allReadings: [String] {
@@ -143,7 +214,43 @@ struct PredictionSnapshot {
         focus: ComposedSegment,
         baseSegments: [ComposedSegment]
     ) -> [ComposedSegment] {
-        baseSegments.flatMap { segment in
+        materializeSelectionSegments(entry: entry, focus: focus, baseSegments: baseSegments).map { segment in
+            var result = segment
+            let key = entry.replacementKey
+            if segment.start < key.start + key.length && key.start < segment.start + segment.length {
+                result.confirmation = .preview
+                if segment.start == key.start && segment.length == key.length {
+                    result.inputSpan = entry.inputSpan
+                }
+            }
+            return result
+        }
+    }
+
+    private static func materializeSelectionSegments(
+        entry: CandidateEntry,
+        focus: ComposedSegment,
+        baseSegments: [ComposedSegment]
+    ) -> [ComposedSegment] {
+        if entry.replacementReadings != nil {
+            let key = entry.replacementKey
+            let range = key.start..<(key.start + key.length)
+            // 預覽沿用原座標，確認時才同步重排讀音與後方鎖定。
+            var replacement = ComposedSegment(languageID: entry.languageID, reading: key.reading,
+                value: entry.text, start: key.start, length: key.length,
+                rawLength: entry.sourceRawInput?.count)
+            replacement.inputSpan = entry.inputSpan
+            replacement.confirmation = .preview
+            var result: [ComposedSegment] = []
+            var inserted = false
+            for segment in baseSegments {
+                if segment.start < range.upperBound && range.lowerBound < segment.start + segment.length {
+                    if !inserted { result.append(replacement); inserted = true }
+                } else { result.append(segment) }
+            }
+            return result
+        }
+        return baseSegments.flatMap { segment in
             guard segment.start == focus.start && segment.length == focus.length else { return [segment] }
             if entry.replacementKey.start == focus.start && entry.replacementKey.length == focus.length {
                 return [ComposedSegment(

@@ -16,6 +16,19 @@ struct CandidateUnit: Equatable {
     let baseRank: Int
 }
 
+enum CompositionConfirmation: String, Codable {
+    case inferred
+    case preview
+    case confirmed
+}
+
+/// 原始按鍵字元座標；與音節索引、Cocoa UTF-16 座標分開。
+struct CompositionInputSpan: Codable, Equatable {
+    let start: Int
+    let end: Int
+    let input: String
+}
+
 struct ComposedSegment: Codable, Equatable {
     let languageID: String
     let reading: String
@@ -23,6 +36,8 @@ struct ComposedSegment: Codable, Equatable {
     let start: Int
     let length: Int
     let rawLength: Int
+    var inputSpan: CompositionInputSpan? = nil
+    var confirmation: CompositionConfirmation = .inferred
 
     init(
         languageID: String,
@@ -45,6 +60,25 @@ struct CandidateEntry: Equatable {
     let text: String
     let languageID: String
     let replacementKey: CompositionSegmentKey
+    // 跨語言更正可能改變音節數；原範圍與替換後讀音分開保存。
+    var replacementReadings: [String]? = nil
+    var sourceRawInput: String? = nil
+    var inputSpan: CompositionInputSpan? = nil
+}
+
+/// 候選身分只描述選取效果；來源標記的補齊不應製造重複候選。
+struct CandidateIdentity: Hashable {
+    let text: String
+    let languageID: String
+    let replacementKey: CompositionSegmentKey
+    let replacementReadings: [String]?
+}
+
+extension CandidateEntry {
+    var identity: CandidateIdentity {
+        CandidateIdentity(text: text, languageID: languageID, replacementKey: replacementKey,
+            replacementReadings: replacementReadings)
+    }
 }
 
 struct CandidateSelectionContext {

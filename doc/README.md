@@ -7,7 +7,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 1. macOS 按鍵事件由 `SessionCtl` 接收，轉成組字引擎可處理的輸入。
 2. `CompositionLanguageRegistry` 管理語言 target，各 target 使用自己的詞庫與組字行為。
 3. `UnifiedCompositionEngine` 統整狀態與候選；中英混打由 `MixedCompositionResolver` 對齊片段。
-4. `CompositionPresentationBuilder` 建立正文、候選、焦點與游標位置，顯示層據此更新 marked text。
+4. `CandidateListPolicy` 統一合併與去重，`CompositionPresentationBuilder` 及 `PredictionSnapshot` 依候選建立預覽、焦點與游標位置，顯示層據此更新 marked text。
 5. 明確選字與提交分開處理，提交後清除原始按鍵及延遲重播狀態。
 
 ## 原始碼入口
@@ -16,7 +16,9 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 | --- | --- |
 | `Sources/main.swift` | IMKInputController、按鍵路由、marked text 與提交生命週期 |
 | `Sources/IME/Models/UnifiedCompositionEngine.swift` | 共用組字狀態與多語言預測 |
-| `Sources/IME/Models/CompositionPresentation.swift` | 候選順序、預覽、正文與游標位置 |
+| `Sources/IME/Models/CompositionPresentation.swift` | 共用候選合併與去重、預覽、正文與游標位置 |
+| `Sources/IME/Models/LanguageTypes.swift` | 來源按鍵範圍、確認狀態與候選身分 |
+| `Sources/IME/Models/MixedMergeSupport.swift` | 中英來源範圍對齊與局部合併 |
 | `../phoneticIME/Sources/PhoneticIMEEngine.swift` | 注音音節、選字鎖定與上下文保留 |
 | `../englishIME/Sources/EnglishIMEEngine.swift` | 英文單字、未完成前綴與候選 |
 | `Sources/IME/Segmentation/ReadingWalker.swift` | 詞庫切分、完整詞與功能字計分 |
@@ -29,24 +31,42 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 
 - 詞庫查詢保留使用者明確輸入的二、三、四聲及輕聲；指定聲調時只查完整讀音，不去調、不跨調、不補近音，詞彙前綴延伸亦保留聲調條件。
 - 候選清單先確定順序，再依同一索引產生預覽；第零項代表目前正文。
-- 游標移動改變選字焦點，不能單憑另一份首選排序覆蓋正文。
+- 候選清單未開啟時，游標移動只改變焦點，不能單憑另一份首選排序覆蓋正文；清單開啟時，方向鍵與 Home／End 先確認目前候選。
 - 確認候選後，未與鎖定範圍交錯的完整詞保留整句上下文。
 - 功能字可能也是完整詞的首字，應比較完整詞與後詞的證據強弱。
 - 單字接輕聲助詞的組合若跨越較強的前詞邊界，不重複取得完整詞加分。
 - mixed 候選需保留 `languageID` 與 `replacementKey`，不以文字或索引反推替換範圍。
 - 個人詞頻只由明確選字累積，讀音使用候選的 `replacementKey.reading`，語言使用候選的 `languageID`；自動提交不建立選字偏好。
 - 顯示游標在完整字元邊界轉成 UTF-16 位移後傳入 Cocoa；詞段尾端對應完整顯示文字的末尾。
-- 雙側候選以文字、語言及替換範圍共同識別，預覽與確認均使用同一替換範圍。
+- `CandidateIdentity` 以文字、語言、`replacementKey` 與 `replacementReadings` 識別候選。來源標記不參與身分比較；同字但替換範圍或重切方式不同的候選保留。
 - 音節插入或刪除時同步搬移後方鎖定；與編輯範圍交錯的詞彙重新解碼。
 - Delete／Backspace 依標準鍵碼判斷刪除方向，Home／End 使用共用組字邊界移動流程。
 
+## 來源按鍵與確認狀態
+
+`UnifiedCompositionState` 使用 `readingRawInputs` 保存已完成音節的來源按鍵，`pendingRawInput` 保存未完成音節。`CompositionInputSpan` 的 `start`／`end` 是原始按鍵的字元座標，採左閉右開範圍；`CompositionSegmentKey` 使用音節座標，Cocoa 顯示位置使用 UTF-16，三者不能混用。
+
+`ComposedSegment.confirmation` 區分 `inferred`（自動推測）、`preview`（候選預覽）與 `confirmed`（人工確認）。`automaticLockedKeys` 與 `explicitLockedKeys` 分開保存，顯示時可以共同保護已解析詞段；新的注音輸入會解除自動決策，人工鎖定則由明確選字及編輯範圍管理。
+
+`rebaseOverrides` 在插入、刪除或跨語言重切時同步更新來源按鍵與前後鎖定位置，移除與編輯範圍交錯的舊鎖定。候選帶有 `inputSpan` 時，確認前會比對目前來源；已失效的範圍不套用。預覽不提交文字，也不建立人工確認。
+
+## 候選合併
+
+`CandidateListPolicy.merge` 同時供雙側候選與正式介面的跨語言候選使用。流程先固定目前正文，對各來源去重後，依來源內的名次交錯合併。同名次、同起點時優先較完整的替換範圍，平手時保留來源順序，最後套用可見數量上限。
+
+中文與英文引擎保留各自的排序及模型評分，合併層不直接比較或相加不同尺度的原始分數。`SessionCtl` 用 `CandidateIdentity` 追蹤選取焦點，避免僅因來源標記補齊而失去原候選。
+
 ## 中英混打
 
-raw buffer 會供各語言 target 判斷。已有可信顯示內容的片段可作為固定 coverage，未覆蓋的區域才交由 mixed merge 處理。中文 coverage 以真實 raw key 長度對齊，英文未完成前綴只固定目前尾端，避免吞掉後續中文起始按鍵。
+原始按鍵緩衝區供各語言 target 判斷。`MixedCompositionResolver` 使用保存的來源按鍵定位本次輸入範圍；有可信中文內容的片段可作為固定 coverage，其餘區域由混打合併處理。短英文若同時具有中文詞庫證據，保留中文路徑並提供英文替代候選。
 
-快取必須同時考量 raw buffer 與固定片段；不能只依字串命中就沿用不同狀態的結果。長句保留已穩定前綴，限制局部重算範圍。
+合併結果只有在來源範圍可精確對應、替換後按鍵完整保留，且未涵蓋人工鎖定時才套用。替換只作用於本次範圍，保留前後既有內容。自動辨識產生的鎖定仍屬自動決策，不轉成人工確認。
+
+跨語言候選從游標附近的完整詞段取得來源按鍵，並保留 `replacementKey`、`replacementReadings` 與 `inputSpan`。預覽沿用原範圍顯示，確認後才重排音節與後方鎖定；目前不對英文單字內部任意猜測拆分位置。
 
 重播快取集中限制為最近 64 筆檢查點，獨立保留編輯後的基準狀態。復原快照保存基準與組字狀態，不複製整份重播快取；缺少檢查點時可從基準重建。中英合併排程使用停頓辨識設定，重設或重新建立編輯基準時取消舊排程。
+
+目前採用既有 Swift 引擎實作上述來源範圍與狀態管理，尚未連結 librime 核心或載入 Rime schema。
 
 ## 模型與設定
 

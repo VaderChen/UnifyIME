@@ -13,6 +13,45 @@ struct CompositionPresentationState {
     var candidates: [String] { candidateEntries.map(\.text) }
 }
 
+/// 各引擎先依自身分數排序，再以名次合併，避免混用不同尺度的分數。
+enum CandidateListPolicy {
+    static func merge(_ lists: [[CandidateEntry]], current: CandidateEntry?, limit: Int) -> [CandidateEntry] {
+        guard limit > 0 else { return [] }
+        var seen = Set<CandidateIdentity>()
+        var result: [CandidateEntry] = []
+        if let current { result.append(current); seen.insert(current.identity) }
+        // 先在每個來源去重，重複項目不佔用名次。
+        let normalized = lists.map { list in
+            var localSeen = Set<CandidateIdentity>()
+            return list.filter { $0.identity != current?.identity && localSeen.insert($0.identity).inserted }
+        }
+        for rank in 0..<(normalized.map(\.count).max() ?? 0) {
+            let ranked = normalized.enumerated().compactMap { source, entries -> (Int, CandidateEntry)? in
+                entries.indices.contains(rank) ? (source, entries[rank]) : nil
+            }
+            let anchorOrder = ranked.reduce(into: [Int: Int]()) { order, item in
+                if order[item.1.replacementKey.start] == nil { order[item.1.replacementKey.start] = item.0 }
+            }
+            let peers = ranked.sorted { lhs, rhs in
+                let leftAnchor = anchorOrder[lhs.1.replacementKey.start] ?? lhs.0
+                let rightAnchor = anchorOrder[rhs.1.replacementKey.start] ?? rhs.0
+                if leftAnchor != rightAnchor { return leftAnchor < rightAnchor }
+                // 同名次、同起點優先完整範圍；以來源順序打破平手。
+                if lhs.1.replacementKey.start == rhs.1.replacementKey.start,
+                   lhs.1.replacementKey.length != rhs.1.replacementKey.length {
+                    return lhs.1.replacementKey.length > rhs.1.replacementKey.length
+                }
+                return lhs.0 < rhs.0
+            }
+            for (_, entry) in peers where seen.insert(entry.identity).inserted {
+                if result.count == limit { return result }
+                result.append(entry)
+            }
+        }
+        return Array(result.prefix(limit))
+    }
+}
+
 enum CompositionPresentationBuilder {
     static func focusedSegment(
         forInsertionIndex insertionIndex: Int,
@@ -34,9 +73,16 @@ enum CompositionPresentationBuilder {
 
     static func segment(for entry: CandidateEntry, in segments: [ComposedSegment]) -> ComposedSegment? {
         let key = entry.replacementKey
-        return segments.first {
+        if let containing = segments.first(where: {
             $0.start <= key.start && key.start + key.length <= $0.start + $0.length
-        }
+        }) { return containing }
+        guard entry.replacementReadings != nil else { return nil }
+        let covered = segments.filter { $0.start >= key.start && $0.start + $0.length <= key.start + key.length }
+        guard covered.first?.start == key.start,
+              covered.last.map({ $0.start + $0.length }) == key.start + key.length else { return nil }
+        return ComposedSegment(languageID: entry.languageID, reading: key.reading,
+            value: covered.map(\.value).joined(), start: key.start, length: key.length,
+            rawLength: covered.reduce(0) { $0 + $1.rawLength })
     }
 
     static func displayCursorLocation(forInsertionIndex insertionIndex: Int, segments: [ComposedSegment]) -> Int {
@@ -91,20 +137,11 @@ enum CompositionPresentationBuilder {
             let focus = baseSegments.first { $0.start <= index && index < $0.start + $0.length }
             return candidateProvider(focus, index)
         }
-        // 左右交錯保留各側排序，以文字、語言及替換範圍共同去重。
-        var candidateEntries: [CandidateEntry] = []
-        if let focus = primaryFocus {
-            candidateEntries.append(CandidateEntry(text: focus.value, languageID: focus.languageID,
-                replacementKey: CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading)))
+        let current = primaryFocus.map { focus in
+            CandidateEntry(text: focus.value, languageID: focus.languageID,
+                replacementKey: CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading))
         }
-        for rank in 0..<(lists.map(\.count).max() ?? 0) {
-            for list in lists where list.indices.contains(rank) {
-                let entry = list[rank]
-                if currentCandidateCursorAlignment != .both, entry.text == primaryFocus?.value { continue }
-                if !candidateEntries.contains(entry) { candidateEntries.append(entry) }
-            }
-        }
-        candidateEntries = Array(candidateEntries.prefix(visibleCandidateLimit))
+        let candidateEntries = CandidateListPolicy.merge(lists, current: current, limit: visibleCandidateLimit)
         let focus: ComposedSegment?
         if selectedCandidateIndex > 0, candidateEntries.indices.contains(selectedCandidateIndex) {
             focus = segment(for: candidateEntries[selectedCandidateIndex], in: baseSegments) ?? primaryFocus

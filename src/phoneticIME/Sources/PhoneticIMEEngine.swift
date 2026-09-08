@@ -122,8 +122,12 @@ enum PhoneticIMECore {
         }
 
         if let mapped = SessionCtl.mapKeySequence(token.lowercased()) {
+            state.invalidateAutomaticDecisions()
             stabilizePrefixBeforeAppend(state: &state)
-            for symbol in mapped.map({ String($0) }) {
+            if state.pendingRawInput.isEmpty, !state.currentReading.isEmpty {
+                state.pendingRawInput = UnifiedCompositionState.sourceInput(for: state.currentReading)
+            }
+            for (rawKey, symbol) in zip(token.lowercased().map(String.init), mapped.map(String.init)) {
                 if SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol) {
                     finalizeCurrentReading(state: &state)
                 }
@@ -140,6 +144,7 @@ enum PhoneticIMECore {
                     prepareFocusedSegmentReplacementIfNeeded(state: &state)
                 }
                 state.currentReading.append(symbol)
+                state.pendingRawInput.append(rawKey)
                 state.selectedCandidateIndex = 0
                 state.rawReadingSymbols = state.readings.joined().map { String($0) }
                 if "ˇˋˊ˙".contains(symbol) {
@@ -221,7 +226,7 @@ enum PhoneticIMECore {
             return segments
         }
         return UnifiedCompositionPrediction(
-            presentation: presentation
+            presentation: state.attachSources(to: presentation)
         )
     }
 
@@ -251,6 +256,9 @@ enum PhoneticIMECore {
         state.selectedCandidateIndex = 0
         state.segmentOverrides = [:]
         state.explicitLockedKeys = []
+        state.automaticLockedKeys = []
+        state.readingRawInputs = []
+        state.pendingRawInput = ""
     }
 
     static func moveCursor(delta: Int, state: inout UnifiedCompositionState) -> Bool {
@@ -278,7 +286,9 @@ enum PhoneticIMECore {
 
     static func pressBackspace(state: inout UnifiedCompositionState) {
         if !state.currentReading.isEmpty {
+            if state.pendingRawInput.isEmpty { state.pendingRawInput = UnifiedCompositionState.sourceInput(for: state.currentReading) }
             state.currentReading.removeLast()
+            state.pendingRawInput.removeLast()
             if state.currentReading.isEmpty, !state.trailingReadings.isEmpty {
                 let restoreCursor = state.readings.count
                 state.readings.append(contentsOf: state.trailingReadings)
@@ -344,8 +354,11 @@ enum PhoneticIMECore {
     private static func finalizeCurrentReading(state: inout UnifiedCompositionState) {
         guard !state.currentReading.isEmpty else { return }
         let insertionIndex = state.currentCompositionCursorIndex()
-        state.rebaseOverrides(replacing: insertionIndex..<insertionIndex, insertedCount: 1)
+        let source = state.pendingRawInput.isEmpty
+            ? UnifiedCompositionState.sourceInput(for: state.currentReading) : state.pendingRawInput
+        state.rebaseOverrides(replacing: insertionIndex..<insertionIndex, insertedCount: 1, insertedRawInputs: [source])
         state.readings.insert(state.currentReading, at: insertionIndex)
+        state.pendingRawInput = ""
         if !state.trailingReadings.isEmpty {
             state.readings.append(contentsOf: state.trailingReadings)
             state.trailingReadings = []
@@ -361,7 +374,7 @@ enum PhoneticIMECore {
         guard let segment = resolved.first(where: { $0.start <= readingIndex && readingIndex < $0.start + $0.length }) else { return }
         let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
         state.segmentOverrides[key] = segment.value
-        state.explicitLockedKeys.insert(key)
+        state.automaticLockedKeys.insert(key)
     }
 
     private static func prepareFocusedSegmentReplacementIfNeeded(state: inout UnifiedCompositionState) {
@@ -377,7 +390,7 @@ enum PhoneticIMECore {
     private static func pruneOverrides(state: inout UnifiedCompositionState) {
         let resolved = SessionCtl.resolveWalk(state.allReadings)
         let validKeys = Set(resolved.map { CompositionSegmentKey(start: $0.start, length: $0.length, reading: $0.reading) })
-        state.segmentOverrides = state.segmentOverrides.filter { validKeys.contains($0.key) || state.explicitLockedKeys.contains($0.key) }
+        state.segmentOverrides = state.segmentOverrides.filter { validKeys.contains($0.key) || state.protectedKeys.contains($0.key) }
         state.compositionCursorIndex = min(state.currentCompositionCursorIndex(), state.allReadings.count)
     }
 
@@ -400,7 +413,7 @@ enum PhoneticIMECore {
         let allReadings = state.allReadings
         guard !allReadings.isEmpty else { return [] }
         let lockedSingles = state.segmentOverrides.compactMap { key, value -> (Int, ComposedSegment)? in
-            guard state.explicitLockedKeys.contains(key) else { return nil }
+            guard state.protectedKeys.contains(key) else { return nil }
             guard key.start >= 0, key.start + key.length <= allReadings.count else { return nil }
             guard allReadings[key.start..<(key.start + key.length)].joined() == key.reading else { return nil }
             return (key.start, ComposedSegment(languageID: SessionCtl.traditionalChineseProvider.languageID, reading: key.reading, value: value, start: key.start, length: key.length, rawLength: rawLength(for: key.reading)))
@@ -453,7 +466,7 @@ enum PhoneticIMECore {
         let values = allReadings.enumerated().compactMap { index, reading -> ComposedSegment? in
             let key = CompositionSegmentKey(start: index, length: 1, reading: reading)
             let lockedValue: String?
-            if state.explicitLockedKeys.contains(key) {
+            if state.protectedKeys.contains(key) {
                 lockedValue = state.segmentOverrides[key]
             } else {
                 lockedValue = nil
@@ -484,7 +497,7 @@ enum PhoneticIMECore {
         to segments: [ComposedSegment],
         state: UnifiedCompositionState
     ) -> [ComposedSegment] {
-        let explicitLocks = state.explicitLockedKeys.compactMap { key -> (CompositionSegmentKey, String)? in
+        let explicitLocks = state.protectedKeys.compactMap { key -> (CompositionSegmentKey, String)? in
             guard let value = state.segmentOverrides[key] else { return nil }
             return (key, value)
         }
@@ -636,7 +649,7 @@ enum PhoneticIMECore {
         for segment in segments where segment.length > 1 && segment.start + segment.length <= cutoff {
             let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
             state.segmentOverrides[key] = segment.value
-            state.explicitLockedKeys.insert(key)
+            state.automaticLockedKeys.insert(key)
         }
     }
 

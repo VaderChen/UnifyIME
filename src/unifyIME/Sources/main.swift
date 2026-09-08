@@ -377,16 +377,17 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     private func unifiedState() -> UnifiedCompositionState {
-        UnifiedCompositionState(
-            readings: readings,
-            trailingReadings: trailingReadings,
-            currentReading: currentReading,
-            compositionCursorIndex: compositionCursorIndex,
-            rawReadingSymbols: rawReadingSymbols,
-            selectedCandidateIndex: selectedCandidateIndex,
-            segmentOverrides: segmentOverrides,
-            explicitLockedKeys: explicitLockedKeys
-        )
+        // 來源按鍵與確認狀態由引擎狀態保存，復原快照也沿用同一份資料。
+        var state = targetState[primaryTargetID] ?? UnifiedCompositionState()
+        state.readings = readings
+        state.trailingReadings = trailingReadings
+        state.currentReading = currentReading
+        state.compositionCursorIndex = compositionCursorIndex
+        state.rawReadingSymbols = rawReadingSymbols
+        state.selectedCandidateIndex = selectedCandidateIndex
+        state.segmentOverrides = segmentOverrides
+        state.explicitLockedKeys = explicitLockedKeys
+        return state
     }
 
     private func applyUnifiedState(_ state: UnifiedCompositionState) {
@@ -441,121 +442,75 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         cachedUnifiedPrediction = nil
     }
 
-    private func mergedCandidates(baseCandidates: [String]) -> [String] {
-        struct RankedCandidate {
-            let text: String
-            let score: Int
-            let tieBreaker: Int
-        }
-
-        var ranked: [RankedCandidate] = []
-        ranked.reserveCapacity(baseCandidates.count + detectedEnglishCandidates.count)
-
-        for (index, candidate) in baseCandidates.enumerated() {
-            let score = 10_000 - (index * 100)
-            ranked.append(RankedCandidate(text: candidate, score: score, tieBreaker: index))
-        }
-
-        for (index, candidate) in detectedEnglishCandidates.enumerated() {
-            let spanLength = candidate.rawEnd - candidate.rawStart
-            let isFullSpan = candidate.rawStart == 0 && candidate.rawEnd == rawInputBuffer.count
-            let isShortWord = candidate.text.count <= 2
-            // English candidates appear around position 6 (after top-5 Chinese)
-            var score = isFullSpan ? 9550 : 9540
-            score += min(spanLength, 8)
-            if isShortWord {
-                score -= 5
+    private func boundaryCandidateEntries(segments: [ComposedSegment]) -> [CandidateEntry] {
+        // 待完成音節尚無穩定替換範圍，完成音節後才提供跨語言替換。
+        guard currentReading.isEmpty, !allReadings.isEmpty,
+              CompositionLanguageRegistry.targets.contains(where: { $0.id == "english-ime" }),
+              CompositionLanguageRegistry.targets.contains(where: { $0.id == "bopomofo-zh-hant" }) else { return [] }
+        let sourceReadings = allReadings
+        let rawUnits = unifiedState().sourceInputs
+        let raw = rawUnits.joined()
+        let activeStart = raw.count - rawInputBuffer.count
+        let hasActiveRawMapping = activeStart >= 0 && raw.hasSuffix(rawInputBuffer)
+        var offsets = [0]
+        for unit in rawUnits { offsets.append(offsets.last! + unit.count) }
+        let focusIndices = currentCandidateCursorAlignment.readingIndices(
+            insertionIndex: currentCompositionCursorIndex(), totalReadings: sourceReadings.count)
+        var entries: [CandidateEntry] = []
+        let lexicon = Self.traditionalChineseProvider.lexicon
+        // 只枚舉游標附近既有詞段邊界，避免猜測英文或中文字內部的替換位置。
+        for first in segments.indices {
+            for last in first..<min(segments.count, first + 5) {
+                let start = segments[first].start
+                let end = segments[last].start + segments[last].length
+                guard start >= 0, end <= sourceReadings.count, end > start,
+                      focusIndices.contains(where: { start <= $0 && $0 < end }) else { continue }
+                let oldText = segments[first...last].map(\.value).joined()
+                let rawSlice = rawUnits[start..<end].joined()
+                guard !rawSlice.isEmpty, rawSlice.count <= 32 else { continue }
+                let key = CompositionSegmentKey(start: start, length: end - start,
+                    reading: sourceReadings[start..<end].joined())
+                // 英文候選使用偵測到的原始範圍，不套用到另一個焦點詞段。
+                let matchingEnglish = hasActiveRawMapping ? detectedEnglishCandidates.filter {
+                    $0.rawStart + activeStart == offsets[start] && $0.rawEnd + activeStart == offsets[end]
+                }.map(\.text) : []
+                let english = matchingEnglish + EnglishIMEEngine.exactSurfaceCandidates(for: rawSlice)
+                for text in english where text != oldText {
+                    let entry = CandidateEntry(text: text, languageID: "english-ime", replacementKey: key,
+                        replacementReadings: [rawSlice], sourceRawInput: rawSlice)
+                    if !entries.contains(entry) { entries.append(entry) }
+                }
+                // 將含英文的局部範圍交回中文引擎重切，支援語言交界更正。
+                guard sourceReadings[start..<end].contains(where: { reading in
+                    reading.unicodeScalars.contains { $0.isASCII && CharacterSet.letters.contains($0) }
+                }) else { continue }
+                var chinese = UnifiedCompositionState()
+                CompositionLanguageRegistry.primary.feed(token: rawSlice, state: &chinese)
+                CompositionLanguageRegistry.primary.feed(token: "<space>", state: &chinese)
+                let replacement = chinese.allReadings
+                guard !replacement.isEmpty else { continue }
+                let reading = replacement.joined()
+                let candidates = (lexicon.phraseCandidateMap[reading] ?? []) + (lexicon.commonCharacterMap[reading] ?? [])
+                for text in candidates.prefix(5) where text != oldText && LexiconStore.isDisplayableCandidate(text) {
+                    let entry = CandidateEntry(text: text, languageID: Self.traditionalChineseProvider.languageID,
+                        replacementKey: key, replacementReadings: replacement, sourceRawInput: rawSlice)
+                    if !entries.contains(entry) { entries.append(entry) }
+                }
             }
-            ranked.append(RankedCandidate(text: candidate.text, score: score, tieBreaker: 10_000 + index))
         }
-
-        ranked.sort {
-            if $0.score != $1.score { return $0.score > $1.score }
-            return $0.tieBreaker < $1.tieBreaker
+        return entries.map { entry in
+            var candidate = entry
+            candidate.inputSpan = unifiedState().inputSpan(for: entry.replacementKey)
+            return candidate
         }
-
-        var seen = Set<String>()
-        var merged: [String] = []
-        merged.reserveCapacity(ranked.count)
-        for entry in ranked {
-            if seen.insert(entry.text).inserted {
-                merged.append(entry.text)
-            }
-        }
-        return merged
-    }
-
-    private func replacementKey(
-        for focus: ComposedSegment,
-        chosen: String,
-        languageID: String
-    ) -> CompositionSegmentKey {
-        let syllables = UnifiedCompositionEngine.splitReadingIntoSyllables(focus.reading)
-        let isSecondaryEnglishCandidate = languageID != primaryTargetID
-        if (chosen.count == 1 || isSecondaryEnglishCandidate), focus.length > 1, syllables.count == focus.length {
-            let cursorIndex = currentCompositionCursorIndex()
-            let preferredIndex = switch currentCandidateCursorAlignment {
-            case .left, .both: cursorIndex > 0 ? cursorIndex - 1 : focus.start
-            case .right: cursorIndex
-            }
-            let readingIndex = max(focus.start, min(focus.start + focus.length - 1, preferredIndex))
-            let localOffset = max(0, min(focus.length - 1, readingIndex - focus.start))
-            return CompositionSegmentKey(
-                start: focus.start + localOffset,
-                length: 1,
-                reading: syllables[localOffset]
-            )
-        }
-        return CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading)
     }
 
     private func candidateEntries(
         prediction: UnifiedCompositionPrediction
     ) -> [CandidateEntry] {
-        let focus = prediction.presentation.focusedSegment
-            ?? prediction.presentation.displayedSegments.last
-        guard let focus else { return [] }
-        let shouldSuppressGarbageBopomofoCandidates =
-            !detectedEnglishCandidates.isEmpty &&
-            focus.value.unicodeScalars.contains(where: { Self.bopomofoGarbageSet.contains($0) })
-        let shouldSuppressSingleSyllableFallbacks =
-            !detectedEnglishCandidates.isEmpty && focus.length > 1
-        let baseCandidates = prediction.presentation.candidateEntries.filter { entry in
-            if shouldSuppressGarbageBopomofoCandidates &&
-                entry.text.unicodeScalars.contains(where: { Self.bopomofoGarbageSet.contains($0) }) {
-                return false
-            }
-            if shouldSuppressGarbageBopomofoCandidates && entry.text.count <= 1 {
-                return false
-            }
-            if shouldSuppressSingleSyllableFallbacks && entry.text.count <= 1 {
-                return false
-            }
-            return true
-        }
-
-        let mixedEntries = detectedEnglishCandidates.map {
-            CandidateEntry(
-                text: $0.text,
-                languageID: "english-ime",
-                replacementKey: replacementKey(for: focus, chosen: $0.text, languageID: "english-ime")
-            )
-        }
-
-        if currentCandidateCursorAlignment == .both {
-            var entries = baseCandidates
-            let insertion = min(5, entries.count)
-            entries.insert(contentsOf: mixedEntries.filter { !entries.contains($0) }, at: insertion)
-            return entries
-        }
-
-        let orderedTexts = mergedCandidates(baseCandidates: baseCandidates.map(\.text))
-        appendFocusedTrace("candidate.pipeline focus=\(focus.reading) focusValue=\(focus.value) readings=\(allReadings.joined(separator: "/")) base=\(baseCandidates.map(\.text).joined(separator: "|")) english=\(mixedEntries.map(\.text).joined(separator: "|")) ordered=\(orderedTexts.joined(separator: "|")) selected=\(selectedCandidateIndex)")
-        var byText: [String: CandidateEntry] = [:]
-        for entry in baseCandidates + mixedEntries where byText[entry.text] == nil {
-            byText[entry.text] = entry
-        }
-        return orderedTexts.compactMap { byText[$0] }
+        let entries = prediction.presentation.candidateEntries
+        let alternatives = boundaryCandidateEntries(segments: prediction.presentation.baseSegments)
+        return CandidateListPolicy.merge([entries, alternatives], current: entries.first, limit: visibleCandidateLimit)
     }
 
     private func snapshot() -> PredictionSnapshot {
@@ -564,7 +519,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         let entries = candidateEntries(prediction: prediction)
         let resolvedSelectedIndex: Int
         if let selectedCandidateEntryHint,
-           let matchedIndex = entries.firstIndex(of: selectedCandidateEntryHint) {
+           let matchedIndex = entries.firstIndex(where: { $0.identity == selectedCandidateEntryHint.identity }) {
             resolvedSelectedIndex = matchedIndex
         } else {
             resolvedSelectedIndex = min(selectedCandidateIndex, max(entries.count - 1, 0))
@@ -577,7 +532,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             insertionIndex: state.currentCompositionCursorIndex(),
             shouldPreviewSelection: candidateMode || basicCandidateWindowRequested,
             segmentOverrides: state.segmentOverrides,
-            explicitLockedKeys: state.explicitLockedKeys,
+            explicitLockedKeys: state.protectedKeys,
             previewSegmentOverrides: previewSegmentOverrides,
             previewLockedKeys: Set(previewSegmentOverrides.keys)
         )
@@ -599,6 +554,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return keyRange.upperBound <= range.lowerBound || keyRange.lowerBound >= range.upperBound
         }
         state.explicitLockedKeys = survivingLockedKeys
+        state.automaticLockedKeys = state.automaticLockedKeys.filter { key in
+            key.start + key.length <= range.lowerBound || key.start >= range.upperBound
+        }
         state.segmentOverrides = state.segmentOverrides.filter { key, _ in
             let keyRange = key.start..<(key.start + key.length)
             return keyRange.upperBound <= range.lowerBound || keyRange.lowerBound >= range.upperBound
@@ -876,7 +834,10 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         traceState("activateServer.before")
         appendRuntimeTrace("activateServer client=\(String(describing: client))")
         resetSelectionSentenceTracking()
+        resetRawReplayState()
+        targetState = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
         readings = []
+        trailingReadings = []
         currentReading = ""
         compositionCursorIndex = nil
         selectedCandidateIndex = 0
@@ -938,6 +899,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         switch selector {
         case #selector(NSResponder.moveUp(_:)):
             flushPendingRawReplay()
+            if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
             suppressCommitUntil = Date().addingTimeInterval(0.5)
@@ -954,6 +916,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return true
         case #selector(NSResponder.moveDown(_:)):
             flushPendingRawReplay()
+            if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
             suppressCommitUntil = Date().addingTimeInterval(0.5)
@@ -1095,6 +1058,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             guard hasComposition else { return false }
             flushPendingRawReplay()
             flushPendingMerge()
+            if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
             suppressCommitUntil = Date().addingTimeInterval(0.5)
@@ -1113,6 +1077,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             guard hasComposition else { return false }
             flushPendingRawReplay()
             flushPendingMerge()
+            if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
             suppressCommitUntil = Date().addingTimeInterval(0.5)
@@ -1295,7 +1260,17 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         }
         let cursorLocation = snap.cursorLocation
         let debugComposing = (text: snap.debugText, focus: snap.focusInfo)
-        let marked = visibleMarkedText(text: visibleText)
+        let marked = NSMutableAttributedString(attributedString: visibleMarkedText(text: visibleText))
+        if (candidateMode || basicCandidateWindowRequested), snap.selectedCandidateIndex > 0,
+           candidateEntries.indices.contains(snap.selectedCandidateIndex) {
+            let key = candidateEntries[snap.selectedCandidateIndex].replacementKey
+            let start = CompositionPresentationBuilder.displayCursorLocation(forInsertionIndex: key.start, segments: displayed)
+            let end = CompositionPresentationBuilder.displayCursorLocation(forInsertionIndex: key.start + key.length, segments: displayed)
+            if start >= 0, end > start, end <= marked.length {
+                marked.addAttribute(.backgroundColor, value: NSColor.controlAccentColor.withAlphaComponent(0.16),
+                    range: NSRange(location: start, length: end - start))
+            }
+        }
         let cursor = NSRange(location: cursorLocation, length: 0)
         let replace = NSRange(location: NSNotFound, length: NSNotFound)
         appendRuntimeTrace("setMarkedText selection=\(NSStringFromRange(cursor)) textLength=\(marked.length) markedText=\(marked.string) primaryMarked=\(snap.markedText)")
@@ -1878,6 +1853,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         let selectionEntries = snap.candidateEntries
         let entry = snap.candidateEntries[index]
         let chosen = entry.text
+        if let span = entry.inputSpan, unifiedState().inputSpan(for: entry.replacementKey) != span {
+            return .failed
+        }
         let candidateTrace = candidates.joined(separator: "|")
         appendFocusedTrace("commitCandidate.before focusStart=\(focus.start) focusLength=\(focus.length) focusReading=\(focus.reading) focusValue=\(focus.value) chosen=\(chosen) advance=\(advance) candidates=\(candidateTrace)")
         var state = unifiedState()
@@ -1889,7 +1867,25 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             let segmentRange = segment.start..<(segment.start + segment.length)
             return segmentRange.lowerBound < focusRange.upperBound && focusRange.lowerBound < segmentRange.upperBound
         }
-        if previewSegments.isEmpty {
+        if let replacement = entry.replacementReadings {
+            let range = entry.replacementKey.start..<(entry.replacementKey.start + entry.replacementKey.length)
+            guard state.currentReading.isEmpty, !replacement.isEmpty,
+                  range.lowerBound >= 0, range.upperBound <= state.allReadings.count else { return .failed }
+            state.readings = state.allReadings
+            state.trailingReadings = []
+            let rawInputs = replacement.count == 1
+                ? [entry.inputSpan?.input ?? entry.sourceRawInput ?? UnifiedCompositionState.sourceInput(for: replacement[0])]
+                : replacement.map(UnifiedCompositionState.sourceInput(for:))
+            guard rawInputs.joined() == (entry.inputSpan?.input ?? entry.sourceRawInput ?? rawInputs.joined()) else { return .failed }
+            state.rebaseOverrides(replacing: range, insertedCount: replacement.count, insertedRawInputs: rawInputs)
+            state.readings.replaceSubrange(range, with: replacement)
+            let newKey = CompositionSegmentKey(start: range.lowerBound, length: replacement.count,
+                reading: replacement.joined())
+            state.segmentOverrides[newKey] = chosen
+            state.explicitLockedKeys.insert(newKey)
+            state.compositionCursorIndex = range.lowerBound + replacement.count
+            state.rawReadingSymbols = state.readings.joined().map(String.init)
+        } else if previewSegments.isEmpty {
             state.segmentOverrides[entry.replacementKey] = chosen
             state.explicitLockedKeys.insert(entry.replacementKey)
         } else {
@@ -1900,7 +1896,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         var reachedEnd = false
         if advance {
             // 從實際選取範圍前進，雙側模式不能固定從左側計算。
-            state.compositionCursorIndex = focus.start + focus.length
+            state.compositionCursorIndex = entry.replacementReadings.map {
+                entry.replacementKey.start + $0.count
+            } ?? (focus.start + focus.length)
             // Re-predict after commit to get updated segments, then advance.
             let updatedPrediction = UnifiedCompositionEngine.predict(state)
             reachedEnd = UnifiedCompositionEngine.advanceCursorToNextSegment(
@@ -1910,7 +1908,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         }
 
         applyUnifiedState(state)
-        previewSegmentOverrides = Dictionary(uniqueKeysWithValues: previewSegments.map {
+        mergedCompositionActive = false
+        detectedEnglishCandidates = []
+        previewSegmentOverrides = entry.replacementReadings != nil ? [:] : Dictionary(uniqueKeysWithValues: previewSegments.map {
             (CompositionSegmentKey(start: $0.start, length: $0.length, reading: $0.reading), $0.value)
         })
         invalidateSnapshot()
@@ -1929,7 +1929,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             chosenIndex: index,
             chosen: chosen
         )
-        UserFrequencyStore.record(languageID: entry.languageID, reading: entry.replacementKey.reading, surface: chosen)
+        UserFrequencyStore.record(languageID: entry.languageID,
+            reading: entry.replacementReadings?.joined() ?? entry.replacementKey.reading, surface: chosen)
         selectedCandidateIndex = 0
         candidateMode = false
         return reachedEnd ? .confirmedAndReachedEnd : .confirmed
@@ -2006,7 +2007,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "record_source": "runtime_user_selection",
             "language_id": entry.languageID,
-            "reading": focus.reading,
+            "reading": entry.replacementReadings?.joined() ?? focus.reading,
             "surface": chosen,
             "chosen_index": chosenIndex,
             "top1": top1,

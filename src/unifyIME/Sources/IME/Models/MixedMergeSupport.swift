@@ -35,10 +35,17 @@ enum MixedCompositionResolver {
         primaryState: UnifiedCompositionState,
         primarySegments: [ComposedSegment]
     ) -> MixedCompositionResolution {
+        let window = sourceWindow(state: primaryState, rawBuffer: rawBuffer, behavior: primaryBehavior)
         let exactFullEnglishCandidate = EnglishIMEEngine.exactSurfaceCandidates(for: rawBuffer).first
         let hasExactFullEnglishMatch = exactFullEnglishCandidate != nil
         let hasStableEnglishPrefix = isStableWholeEnglishPrefix(rawBuffer)
-        let prefersWholeEnglishSpan = hasExactFullEnglishMatch || hasStableEnglishPrefix
+        // 短英文也可能是完整注音鍵序；詞庫已有中文依據時保留中文路徑。
+        let pendingReading = primaryState.currentReading
+        let lexicon = SessionCtl.traditionalChineseProvider.lexicon
+        let hasExactPendingChinese = !(lexicon.commonCharacterMap[pendingReading] ?? []).isEmpty
+        let ambiguousShortEnglish = rawBuffer.count <= 3 && (hasExactPendingChinese ||
+            primarySegments.contains { LexiconStore.isDisplayableCandidate($0.value) })
+        let prefersWholeEnglishSpan = (hasExactFullEnglishMatch && !ambiguousShortEnglish) || hasStableEnglishPrefix
         let previousIncrementalAnalysis = cachedIncrementalAnalysis(
             for: String(rawBuffer.dropLast())
         )
@@ -47,10 +54,16 @@ enum MixedCompositionResolver {
             : buildFixedPrimaryCoverages(
                 from: primarySegments,
                 rawBufferLength: rawBuffer.count,
+                activeRawStart: window?.rawStart,
+                state: primaryState,
                 primaryTargetID: primaryTargetID,
-                primaryLanguageID: primaryLanguageID,
-                primaryBehavior: primaryBehavior
+                primaryLanguageID: primaryLanguageID
             )
+        if ambiguousShortEnglish, fixedPrimaryCoverages.isEmpty, hasExactPendingChinese,
+           let value = lexicon.commonCharacterMap[pendingReading]?.first {
+            fixedPrimaryCoverages = [RawSpanCoverage(targetID: primaryTargetID, start: 0,
+                end: rawBuffer.count, text: value, score: 100_000)]
+        }
         if !prefersWholeEnglishSpan {
             let strongEnglishCoverages = strongestExactEnglishCoverages(in: rawBuffer)
             if !strongEnglishCoverages.isEmpty {
@@ -63,12 +76,8 @@ enum MixedCompositionResolver {
                 let stablePrimaryPrefix = fixedPrimaryCoverages.filter {
                     $0.end <= firstEnglishStart
                 }
-                let inheritedStableCoverages = previousIncrementalAnalysis?.merge.coverages.filter {
-                    $0.end <= max(0, rawBuffer.count - incrementalTailReanalysisLength - 1)
-                } ?? []
-                fixedPrimaryCoverages = nonOverlappingCoverages(
-                    stablePrimaryPrefix + inheritedStableCoverages + strongEnglishCoverages
-                )
+                // 不跨會話沿用僅依字串快取的決策；已確認內容由來源範圍保護。
+                fixedPrimaryCoverages = nonOverlappingCoverages(stablePrimaryPrefix + strongEnglishCoverages)
             }
         }
         let analyzed = MixedMergeSupport.analyze(
@@ -77,7 +86,7 @@ enum MixedCompositionResolver {
             fixedPrimaryCoverages: fixedPrimaryCoverages,
             preferIncrementalTailOptimization: previousIncrementalAnalysis != nil
         )
-        let analysis: MixedMergeAnalysis
+        var analysis: MixedMergeAnalysis
         if prefersWholeEnglishSpan,
            let englishTargetID = CompositionLanguageRegistry.targets.first(where: { $0.id == "english-ime" })?.id {
             let englishText = exactFullEnglishCandidate ?? rawBuffer
@@ -106,6 +115,13 @@ enum MixedCompositionResolver {
         } else {
             analysis = analyzed
         }
+        if let englishText = exactFullEnglishCandidate,
+           !analysis.detectedEnglishCandidates.contains(where: {
+               $0.rawStart == 0 && $0.rawEnd == rawBuffer.count && $0.text == englishText
+           }) {
+            analysis = MixedMergeAnalysis(merge: analysis.merge,
+                detectedEnglishCandidates: analysis.detectedEnglishCandidates + [(0, rawBuffer.count, englishText)])
+        }
         storeIncrementalAnalysis(analysis, for: rawBuffer)
 
 
@@ -115,13 +131,59 @@ enum MixedCompositionResolver {
             return MixedCompositionResolution(analysis: analysis, materializedState: nil)
         }
 
-        let state = materialize(
+        guard let window else {
+            return MixedCompositionResolution(analysis: analysis, materializedState: nil)
+        }
+        // 自動辨識不能跨越人工確認；使用者仍可用局部候選明確更正。
+        guard !window.state.explicitLockedKeys.contains(where: {
+            $0.start < window.range.upperBound && window.range.lowerBound < $0.start + $0.length
+        }) else { return MixedCompositionResolution(analysis: analysis, materializedState: nil) }
+        let replacement = materialize(
             merge: merge,
             rawBuffer: rawBuffer,
             primaryTargetID: primaryTargetID,
             primaryBehavior: primaryBehavior
         )
+        guard replacement.sourceInputs.joined() == rawBuffer else {
+            return MixedCompositionResolution(analysis: analysis, materializedState: nil)
+        }
+        var state = window.state
+        state.invalidateAutomaticDecisions()
+        state.readings = state.allReadings
+        state.trailingReadings = []
+        state.rebaseOverrides(replacing: window.range, insertedCount: replacement.readings.count,
+            insertedRawInputs: replacement.sourceInputs)
+        state.readings.replaceSubrange(window.range, with: replacement.readings)
+        for (key, value) in replacement.segmentOverrides {
+            let shifted = CompositionSegmentKey(start: window.range.lowerBound + key.start,
+                length: key.length, reading: key.reading)
+            state.segmentOverrides[shifted] = value
+            state.automaticLockedKeys.insert(shifted)
+        }
+        state.compositionCursorIndex = window.range.lowerBound + replacement.readings.count
+        state.rawReadingSymbols = state.readings.joined().map(String.init)
         return MixedCompositionResolution(analysis: analysis, materializedState: state)
+    }
+
+    private static func sourceWindow(state: UnifiedCompositionState, rawBuffer: String,
+        behavior: CompositionLanguageBehavior) -> (state: UnifiedCompositionState, range: Range<Int>, rawStart: Int)? {
+        guard !rawBuffer.isEmpty else { return nil }
+        var completed = state
+        if !completed.currentReading.isEmpty { behavior.feed(token: "<space>", state: &completed) }
+        let units = completed.sourceInputs
+        let end = completed.currentCompositionCursorIndex()
+        guard end <= units.count else { return nil }
+        let rawEnd = units.prefix(end).reduce(0) { $0 + $1.count }
+        let rawStart = rawEnd - rawBuffer.count
+        guard rawStart >= 0 else { return nil }
+        var offset = 0
+        for start in 0..<end {
+            if offset == rawStart, units[start..<end].joined() == rawBuffer {
+                return (completed, start..<end, rawStart)
+            }
+            offset += units[start].count
+        }
+        return nil
     }
 
     private static func cachedIncrementalAnalysis(for rawBuffer: String) -> MixedMergeAnalysis? {
@@ -376,66 +438,26 @@ enum MixedCompositionResolver {
         return (coverage, canContinue)
     }
 
-    private static func effectiveRawLength(
-        for segment: ComposedSegment,
-        primaryLanguageID: String,
-        primaryBehavior: CompositionLanguageBehavior
-    ) -> Int {
-        guard segment.languageID == primaryLanguageID else {
-            return max(0, segment.rawLength)
-        }
-        let sequence = primaryBehavior.keySequence(for: [segment.reading])
-            .replacingOccurrences(of: " ", with: "")
-        return max(1, sequence.count)
-    }
-
     private static func buildFixedPrimaryCoverages(
         from segments: [ComposedSegment],
         rawBufferLength: Int,
+        activeRawStart: Int?,
+        state: UnifiedCompositionState,
         primaryTargetID: String,
-        primaryLanguageID: String,
-        primaryBehavior: CompositionLanguageBehavior
+        primaryLanguageID: String
     ) -> [RawSpanCoverage] {
-        guard rawBufferLength > 0 else { return [] }
-        let totalRawLength = segments.reduce(0) { partial, segment in
-            partial + effectiveRawLength(
-                for: segment,
-                primaryLanguageID: primaryLanguageID,
-                primaryBehavior: primaryBehavior
-            )
-        }
-        let activeWindowStart = max(0, totalRawLength - rawBufferLength)
+        guard rawBufferLength > 0, let activeRawStart else { return [] }
         var result: [RawSpanCoverage] = []
-        var rawCursor = 0
-
         for segment in segments {
-            let segmentRawLength = effectiveRawLength(
-                for: segment,
-                primaryLanguageID: primaryLanguageID,
-                primaryBehavior: primaryBehavior
-            )
-            let segmentStart = rawCursor
-            let segmentEnd = rawCursor + segmentRawLength
-            rawCursor = segmentEnd
+            let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
             guard segment.languageID == primaryLanguageID,
-                  segmentRawLength > 0,
-                  segmentStart >= activeWindowStart,
-                  !segment.value.unicodeScalars.contains(where: { bopomofoGarbageSet.contains($0) })
-            else {
-                continue
-            }
-            let start = max(0, segmentStart - activeWindowStart)
-            let end = min(rawBufferLength, segmentEnd - activeWindowStart)
-            guard end > start else { continue }
-            result.append(
-                RawSpanCoverage(
-                    targetID: primaryTargetID,
-                    start: start,
-                    end: end,
-                    text: segment.value,
-                    score: 100_000 + Double(segmentRawLength * 100)
-                )
-            )
+                  let span = state.inputSpan(for: key),
+                  span.start >= activeRawStart, span.end <= activeRawStart + rawBufferLength,
+                  span.end > span.start,
+                  !segment.value.unicodeScalars.contains(where: { bopomofoGarbageSet.contains($0) }) else { continue }
+            result.append(RawSpanCoverage(targetID: primaryTargetID,
+                start: span.start - activeRawStart, end: span.end - activeRawStart,
+                text: segment.value, score: 100_000 + Double((span.end - span.start) * 100)))
         }
         return result
     }
@@ -448,6 +470,7 @@ enum MixedCompositionResolver {
     ) -> UnifiedCompositionState {
         let chars = Array(rawBuffer)
         var readings: [String] = []
+        var sourceInputs: [String] = []
         var overrides: [CompositionSegmentKey: String] = [:]
         var lockedKeys = Set<CompositionSegmentKey>()
         var previousTargetID: String?
@@ -459,6 +482,7 @@ enum MixedCompositionResolver {
                 if currentIsSecondary || previousIsSecondary {
                     let index = readings.count
                     readings.append(" ")
+                    sourceInputs.append("")
                     let key = CompositionSegmentKey(start: index, length: 1, reading: " ")
                     overrides[key] = " "
                     lockedKeys.insert(key)
@@ -469,6 +493,7 @@ enum MixedCompositionResolver {
             if coverage.targetID != primaryTargetID {
                 let index = readings.count
                 readings.append(coverage.text)
+                sourceInputs.append(String(chars[coverage.start..<coverage.end]))
                 let key = CompositionSegmentKey(start: index, length: 1, reading: coverage.text)
                 overrides[key] = coverage.text
                 lockedKeys.insert(key)
@@ -479,16 +504,14 @@ enum MixedCompositionResolver {
             var primaryState = UnifiedCompositionState()
             primaryBehavior.feed(token: rawSlice, state: &primaryState)
             if !primaryState.currentReading.isEmpty {
-                primaryState.readings.append(primaryState.currentReading)
-                primaryState.currentReading = ""
+                primaryBehavior.feed(token: "<space>", state: &primaryState)
             }
             let materializedReadings = primaryState.allReadings
             let startIndex = readings.count
             readings.append(contentsOf: materializedReadings)
+            sourceInputs.append(contentsOf: primaryState.sourceInputs)
             if !materializedReadings.isEmpty {
-                // Preserve only locally confirmed multi-syllable phrases.
-                // Locking an entire raw coverage can freeze a partial final
-                // syllable (卻 + 任) before the next coverage forms 確認.
+                // 只暫存局部多音節詞的自動決策，不將整個來源區段視為人工確認。
                 for segment in primaryBehavior.resolveWalk(materializedReadings) where segment.length > 1 {
                     guard !segment.value.unicodeScalars.contains(where: { bopomofoGarbageSet.contains($0) }) else {
                         continue
@@ -512,7 +535,9 @@ enum MixedCompositionResolver {
             rawReadingSymbols: readings.joined().map { String($0) },
             selectedCandidateIndex: 0,
             segmentOverrides: overrides,
-            explicitLockedKeys: lockedKeys
+            explicitLockedKeys: [],
+            automaticLockedKeys: lockedKeys,
+            readingRawInputs: sourceInputs
         )
     }
 }

@@ -52,3 +52,42 @@ __pycache__/
 
 # 本機發布設定，不納入 GitHub
 /pack.command
+
+# 本機訓練與模型實驗程式
+/src/unifyIME/scripts/benchmark_listwise_coreml.swift
+/src/unifyIME/scripts/build_balanced_candidate_dataset.py
+/src/unifyIME/scripts/build_cli_sentence_training_set.py
+/src/unifyIME/scripts/build_expanded_mother_corpus.py
+/src/unifyIME/scripts/build_listwise_sentence_splits.py
+/src/unifyIME/scripts/build_mixed_article_candidate_dataset.py
+/src/unifyIME/scripts/build_ranker_expanded_dataset.py
+/src/unifyIME/scripts/build_sentence_hard_cases.py
+/src/unifyIME/scripts/build_sentence_neighbor_negatives.py
+/src/unifyIME/scripts/build_sentence_reranker_dataset.py
+/src/unifyIME/scripts/build_sentence_three_path_negatives.py
+/src/unifyIME/scripts/build_true_negative_sentence_groups.py
+/src/unifyIME/scripts/collect_cli_nn_samples.py
+/src/unifyIME/scripts/export_listwise_checkpoint.py
+/src/unifyIME/scripts/extract_sentence_mother_samples.py
+/src/unifyIME/scripts/fetch_open_mixed_corpus.py
+/src/unifyIME/scripts/fetch_traditional_corpus.py
+/src/unifyIME/scripts/inspect_coreml_compute_plan.swift
+/src/unifyIME/scripts/retrain_ranker.py
+/src/unifyIME/scripts/run_listwise_sentence_cv.py
+/src/unifyIME/scripts/run_ranker_x10_loop.py
+/src/unifyIME/scripts/sentence_reranker_ab_check.py
+/src/unifyIME/scripts/sentence_reranker_alpha_sweep.py
+/src/unifyIME/scripts/split_cli_nn_groups.py
+/src/unifyIME/scripts/train_candidate_ranker.py
+/src/unifyIME/scripts/train_listwise_transformer.py
+/src/unifyIME/scripts/train_sentence_reranker.py
+/src/unifyIME/scripts/validate_sentence_reranker_on_failures.py
+/src/unifyIME/test_train.sh
+
+# 本機研究、文章測試與結果
+/doc/LIBRIME_CORE_RESEARCH.md
+/doc/同音詞邊界案例.md
+/src/unifyIME/scripts/article_accuracy.py
+/src/unifyIME/scripts/article_rounds.py
+/src/unifyIME/tests/article_keys.json
+/測試文章_*.txt
