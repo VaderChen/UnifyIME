@@ -592,6 +592,13 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     static let directPunctuationMap: [String: String] = [
         "?": "？",
         "!": "！",
+        "@": "＠",
+        "#": "＃",
+        "$": "＄",
+        "%": "％",
+        "^": "＾",
+        "&": "＆",
+        "*": "＊",
         ":": "：",
         ";": "；",
         "(": "（",
