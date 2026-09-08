@@ -35,6 +35,12 @@ zsh build.command
 
 預設建立 `bin/app/全一輸入法.app` 與 `dist/全一輸入法.app`，不更新系統輸入法。可明確加上 `--sign --deploy` 執行簽章及部署。`IMEConfig.json` 會隨 app 打包，目前 `candidateWindowLength` 預設為 6。
 
+## 詞庫資源
+
+建置會打包目前的中文與英文 TSV 詞庫，並將 `lexicons/README.md` 複製為 app 內的 `Contents/Resources/Lexicon-Licenses.md`，保留來源與授權說明。一般建置不會連線重新下載或匯入詞庫。
+
+更新詞庫來源時，先依 [開放詞庫說明](../lexicons/README.md) 執行匯入，再重新建置及安裝；只修改工作目錄中的 TSV 不會更新已安裝的 app。逐詞來源清單保留在專案 `lexicons/`，原始下載快照留在本機 `data/lexicon-import/`。
+
 ## 正式發布與一鍵安裝 DMG
 
 `pack.command` 為發布者本機工具，不納入 GitHub；需自行備妥發布設定後，才可在專案根目錄執行：

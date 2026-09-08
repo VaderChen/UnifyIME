@@ -988,7 +988,12 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         lastInputDebug = "key=\(event.keyCode) chars=\(inputChars.isEmpty ? "∅" : inputChars) raw=\(rawChars.isEmpty ? "∅" : rawChars) mods=\(modifiers.rawValue)"
         lastRouteDebug = "handle(keyCode=\(event.keyCode))"
         publishDetailedProbeIfNeeded(route: lastRouteDebug, input: lastInputDebug, composing: composingBuffer, candidateEntries: Array(activeCandidateEntries.prefix(visibleCandidateLimit)), selectedIndex: selectedCandidateIndex)
-        if !hasComposition && (modifiers.contains(.command) || modifiers.contains(.option) || modifiers.contains(.numericPad) || isControlLetterHotKey) {
+        if handleSymbolShortcut(event, client: client) { return true }
+        if !modifiers.intersection([.command, .option, .control]).isEmpty {
+            if hasComposition { commitCurrentComposition(client, reason: "applicationShortcut") }
+            return false
+        }
+        if !hasComposition && (modifiers.contains(.numericPad) || isControlLetterHotKey) {
             return false
         }
 
@@ -1455,8 +1460,10 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
 
     private func handleNumericPadInput(_ event: NSEvent, client: Any!) -> Bool {
         guard !shouldTreatAsArrowLike(event) else { return false }
+        // 導航鍵也可能帶有 numericPad 旗標；只有實際數字與運算符號走此路徑。
         if event.modifierFlags.contains(.numericPad),
-           let chars = event.characters, !chars.isEmpty {
+           let chars = event.characters, !chars.isEmpty,
+           chars.unicodeScalars.allSatisfy({ Self.numericPadAllowedSet.contains($0) }) {
             pendingRawCommitReason = "numericPad"
             commitRawText(chars, client: client)
             return true
@@ -1464,12 +1471,40 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         return false
     }
 
+    private func insertComposingSymbol(_ symbol: String, client: Any!) {
+        flushPendingRawReplay()
+        flushPendingMerge()
+        pushCompositionUndoSnapshot()
+        var state = unifiedState()
+        SymbolCandidates.insert(symbol, state: &state)
+        applyUnifiedState(state)
+        clearPreviewSegmentOverrides()
+        selectedCandidateEntryHint = nil
+        basicCandidateWindowRequested = false
+        candidateMode = false
+        mergedCompositionActive = false
+        detectedEnglishCandidates = []
+        rebaseRawReplayOnCurrentState()
+        updateMarkedText(client)
+    }
+
+    private func handleSymbolShortcut(_ event: NSEvent, client: Any!) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift, .function])
+        let shortcuts = flags.intersection([.command, .control])
+        guard shortcuts == [.command] || shortcuts == [.control],
+              !flags.contains(.option), !flags.contains(.function),
+              let fallback = SymbolCandidates.shortcutByKeyCode[event.keyCode] else { return false }
+        let symbol = flags.contains(.shift)
+            ? (Self.directPunctuationMap[event.characters ?? ""] ?? fallback) : fallback
+        insertComposingSymbol(symbol, client: client)
+        return true
+    }
+
     private func handleShiftedPunctuation(_ event: NSEvent, client: Any!) -> Bool {
         guard event.modifierFlags.contains(.shift),
               let chars = event.characters, chars.count == 1 else { return false }
         if let mapped = Self.directPunctuationMap[chars] {
-            pendingRawCommitReason = "shiftedPunctuation"
-            commitRawText(mapped, client: client)
+            insertComposingSymbol(mapped, client: client)
             return true
         }
         return false
@@ -1500,8 +1535,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         guard let chars = event.characters, chars.count == 1 else { return false }
         guard !shouldTreatAsArrowLike(event) else { return false }
         if let mapped = Self.directPunctuationMap[chars] {
-            pendingRawCommitReason = "directPunctuation"
-            commitRawText(mapped, client: client)
+            insertComposingSymbol(mapped, client: client)
             return true
         }
         return false

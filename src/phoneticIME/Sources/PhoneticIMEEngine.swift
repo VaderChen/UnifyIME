@@ -167,6 +167,13 @@ enum PhoneticIMECore {
             selectedCandidateIndex: state.selectedCandidateIndex,
             visibleCandidateLimit: visibleCandidateLimit
         ) { focus, localFocusReadingIndex in
+            if let focus, focus.length == 1 {
+                let symbols = SymbolCandidates.values(for: focus.reading)
+                if !symbols.isEmpty {
+                    let key = CompositionSegmentKey(start: focus.start, length: 1, reading: focus.reading)
+                    return symbols.map { CandidateEntry(text: $0, languageID: focus.languageID, replacementKey: key) }
+                }
+            }
             let candidates = computeActiveCandidates(
                 candidateReadings: state.allReadings,
                 walkedSegments: baseSegments,

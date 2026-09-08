@@ -1,0 +1,620 @@
+{
+  "imported": {
+    "en": 10669,
+    "zh": 85922
+  },
+  "licenses": {
+    "moe-revised": "CC-BY-ND-3.0-TW",
+    "wikidata": "CC0-1.0"
+  },
+  "moedict": {
+    "revision": "a6dc997417507eb510fc29822bc514de2c92728c",
+    "url": "https://raw.githubusercontent.com/g0v/moedict-data/a6dc997417507eb510fc29822bc514de2c92728c/dict-revised.json.xz"
+  },
+  "schema_version": 1,
+  "source_files": [
+    {
+      "file": "moedict-source.json",
+      "sha256": "74701d469f190dd9ab4fe1801f9ce745f757d0242fb5a2f683b07546f7e393f5"
+    },
+    {
+      "file": "moedict.json.xz",
+      "sha256": "5cc4ec0efd7e549621edf9b46d261989230c1729d9dc2c8e2056f4b21c8a93da"
+    },
+    {
+      "file": "wikidata-brands.json",
+      "sha256": "a24ef56c74b067fb71bf33d9e905710771063b37c6cebb11e9526be66a70681e"
+    },
+    {
+      "file": "wikidata-brands.query.txt",
+      "sha256": "f3c0fce5c91f93dc9cb9e6e5834162e8a8abcad736a9c7af414f1e0cd1454e65"
+    },
+    {
+      "file": "wikidata-companies.json",
+      "sha256": "b902d104412211c7bed1823f97a0c5efb199d4fcd37c4050f66bf0cd8d695e10"
+    },
+    {
+      "file": "wikidata-companies.query.txt",
+      "sha256": "3d866850faf2dc1dadcb485e572afa0e13054d9071c202c833f549ebe2d2254c"
+    },
+    {
+      "file": "wikidata-languages.json",
+      "sha256": "f0aecfe4d0f15997803b775584e66f3e750669de862baaf97044280ab8358979"
+    },
+    {
+      "file": "wikidata-manufacturers.json",
+      "sha256": "6ef8a158c9a9377f7e1b60c7d7ee208ac2e7e49407f221579a2582cd0481c75c"
+    },
+    {
+      "file": "wikidata-manufacturers.query.txt",
+      "sha256": "c32ad0717ba22d8f281ec277fffe906256e23fc99ea683d6ee7d8e90c9416e4e"
+    },
+    {
+      "file": "wikidata-names-00286007174943bc.json",
+      "sha256": "61ca4556cbfcde5e8d973a2d0ce48076012d7428f38ca9a64f0dc91317736ff5"
+    },
+    {
+      "file": "wikidata-names-00286007174943bc.query.txt",
+      "sha256": "49d9e415c75d61a853aacda8ee979ee5501a4f0811a0a3de2c232b2ee9b53c97"
+    },
+    {
+      "file": "wikidata-names-008450c5ef290f25.json",
+      "sha256": "045ee492c519e51b471396bc78aaf3aebd9e1cae00f2f785d31edfec6125036a"
+    },
+    {
+      "file": "wikidata-names-008450c5ef290f25.query.txt",
+      "sha256": "90d3e691af835ee5d7df50e890537a931a839d54e040fc4e9ac6846a94589fac"
+    },
+    {
+      "file": "wikidata-names-06a9ae9b5b93dfe7.json",
+      "sha256": "ce1b024614bbff32bbc7c14d8cc1cc8ef982e28b4b558fbb972d5b8291b802f4"
+    },
+    {
+      "file": "wikidata-names-06a9ae9b5b93dfe7.query.txt",
+      "sha256": "2c12df89509b807c71704a6b0e1c8dcf2917cead14805feec13fbe76c346925f"
+    },
+    {
+      "file": "wikidata-names-07cbec1b982b8d8d.json",
+      "sha256": "dcbf796f5c6d4d4dbbf7faf0d0c992d576c446302403dbc1409953506bad87b3"
+    },
+    {
+      "file": "wikidata-names-07cbec1b982b8d8d.query.txt",
+      "sha256": "1a515242cccc3083673a12bd1bcb82801e5fed4035bd8c15d275c2871500c852"
+    },
+    {
+      "file": "wikidata-names-0e77f80ce97a6600.json",
+      "sha256": "e41688252b944b667fe032463357d4c178332623fdbc4cc5177742ddf2a8b707"
+    },
+    {
+      "file": "wikidata-names-0e77f80ce97a6600.query.txt",
+      "sha256": "a9d69385bd6d280369c9bcba520687e456db59c5ec1609a8a3dca37db7968873"
+    },
+    {
+      "file": "wikidata-names-129eb6a883b89b5e.json",
+      "sha256": "b55361e2be983aaa4be0c7cd242efe3b0fe730200ba85a3c4ff2758c2b9c3073"
+    },
+    {
+      "file": "wikidata-names-129eb6a883b89b5e.query.txt",
+      "sha256": "af3e0548168d8ab15351c5c6e7fbc62f09ef9df31c4c8f2bf9b53f15e417b980"
+    },
+    {
+      "file": "wikidata-names-15b13f10c3c2a7c9.json",
+      "sha256": "33e5eddead2dadf113647303ae6583c7f12907c4e2e154b760661e86fb21b7bc"
+    },
+    {
+      "file": "wikidata-names-15b13f10c3c2a7c9.query.txt",
+      "sha256": "8f30b5518e8dcb41a78023ebf8e55ee65c8cc81d847ca5fa972feb5f9ea48d95"
+    },
+    {
+      "file": "wikidata-names-1d5a2fd9022efca5.json",
+      "sha256": "43f25481a5caba1f1c5fb507a79410033ef8d06c6b11c799b776f87cdea24fdd"
+    },
+    {
+      "file": "wikidata-names-1d5a2fd9022efca5.query.txt",
+      "sha256": "e6017ae460645876a2ba23752c70a41f69c1decc64aae568ec164b155793fe81"
+    },
+    {
+      "file": "wikidata-names-1f6459489fb6cb21.json",
+      "sha256": "7b5218afeefb463bf1f2af2d65ff26e164fdf30aee33622ddf153cc33de77e51"
+    },
+    {
+      "file": "wikidata-names-1f6459489fb6cb21.query.txt",
+      "sha256": "adae2d3abc4c564a4ed4bd40ae754d7af6934790918733cffa63c6d245b9f242"
+    },
+    {
+      "file": "wikidata-names-3158379d7cbe4026.json",
+      "sha256": "e34c093291319546dca404013342202693f8f8145748367123912eab9323b1ed"
+    },
+    {
+      "file": "wikidata-names-3158379d7cbe4026.query.txt",
+      "sha256": "d35264914d6c97baef6b5a6df45433105a25d82bf394591e0d0ee046f1198bef"
+    },
+    {
+      "file": "wikidata-names-31a4fe911a74056e.json",
+      "sha256": "85464210f1601c9a6045a79d3106609ba8526e2b99ac1740b81892f0e500a5fd"
+    },
+    {
+      "file": "wikidata-names-31a4fe911a74056e.query.txt",
+      "sha256": "f3a9fd4538c1630ba4937c4aff03c29d44eb0464f0dd167c5f419aabafad3869"
+    },
+    {
+      "file": "wikidata-names-3586721424c6e84a.json",
+      "sha256": "8145b65a7147b599bd9b48a33dd76fc65a0069201a33a008bb51dbaef48827aa"
+    },
+    {
+      "file": "wikidata-names-3586721424c6e84a.query.txt",
+      "sha256": "1387caf30d4c1456457e215f23af2f9500cf9a72368dbbc74a6d3074318aafb4"
+    },
+    {
+      "file": "wikidata-names-3744303037352cdd.json",
+      "sha256": "2bf8853447fd82ef31bb54dde737f0e34385dfbbea23fbe4f4fcf1855db9c3dd"
+    },
+    {
+      "file": "wikidata-names-3744303037352cdd.query.txt",
+      "sha256": "1c0c1b6f9c3f14ee99774d1adbfc5c4285ae432f859eed3e64013d619391d559"
+    },
+    {
+      "file": "wikidata-names-3c29d6d0c28480ac.json",
+      "sha256": "7078ad5742194de7da8c0740f5fca1ed4daf117042630960543f0c7cd6e723ff"
+    },
+    {
+      "file": "wikidata-names-3c29d6d0c28480ac.query.txt",
+      "sha256": "e8738b9e2f42618a95454509c646ecd92da7fb79eee3e8b4d83259747344e44b"
+    },
+    {
+      "file": "wikidata-names-3dd28f5ca6f5bd21.json",
+      "sha256": "9e825343c48788040eb69a60f70ca1e1fff16307e75d56b41bf249237df781a7"
+    },
+    {
+      "file": "wikidata-names-3dd28f5ca6f5bd21.query.txt",
+      "sha256": "32f5ab66380cdba43cd0a286d8839422b12d2ebb0460a1ac85e8e301c83fc0be"
+    },
+    {
+      "file": "wikidata-names-4ed058f02de29d62.json",
+      "sha256": "b528b575e45c9a84c262349aee67d3cd77ac74aadf3698542b3b178d08fae6ef"
+    },
+    {
+      "file": "wikidata-names-4ed058f02de29d62.query.txt",
+      "sha256": "fe20939bf1fb8eaed4ff34aec09ce6fa35783741f1a551db9411a1988744ee4b"
+    },
+    {
+      "file": "wikidata-names-4efd3dbd00236b8a.json",
+      "sha256": "a2073f08276e210b05efd3416e9d19d52d1c34757811e9491b9a9d4a26b08cf9"
+    },
+    {
+      "file": "wikidata-names-4efd3dbd00236b8a.query.txt",
+      "sha256": "116c3d8ab1b490b162c08cef553d50f7c3be57689748eefe0eaf5306e3f59868"
+    },
+    {
+      "file": "wikidata-names-50f386af35ea083b.json",
+      "sha256": "1ccc667e928f317e7b706bcca0af39d14f9492e349a0bc44bfe8651d48ed48b8"
+    },
+    {
+      "file": "wikidata-names-50f386af35ea083b.query.txt",
+      "sha256": "ac987d8965962da6e5b44c0135a865abbae1eac1fa73ab6c81ad34fbcf15f2bd"
+    },
+    {
+      "file": "wikidata-names-53bf90a3086612f6.json",
+      "sha256": "49935dc4f53d47f1cf1b36d46f9cdd6649824e36b745d0ab2a9744de805c3dd9"
+    },
+    {
+      "file": "wikidata-names-53bf90a3086612f6.query.txt",
+      "sha256": "e6d9f6491912eb6a56f1f64d08db4a85187d53c833af62a973a6c4387ea8a4ff"
+    },
+    {
+      "file": "wikidata-names-54020fc6087190c2.json",
+      "sha256": "66bb6dbdbbc4dac62fa879d48d6eaaca1d2e105f982ca45061edab8745cc80bf"
+    },
+    {
+      "file": "wikidata-names-54020fc6087190c2.query.txt",
+      "sha256": "a6b769824e0dd023aec51a9202896e146d33597f6ec93c8b2918716381578f7f"
+    },
+    {
+      "file": "wikidata-names-57acb17d4deda195.json",
+      "sha256": "28beaf57bb9bdfc3bd959d9484db72976494bd1f7d340d6f44acd378cf08c249"
+    },
+    {
+      "file": "wikidata-names-57acb17d4deda195.query.txt",
+      "sha256": "f372b50f3aafbe8db082ab339048e4d02541c5001342aae3e5b536dc32ddebe3"
+    },
+    {
+      "file": "wikidata-names-61d52c60a3243633.json",
+      "sha256": "22c5c9360e96f62fac22e397deeecfa3aafbabb297ce58f26b402521d98411b6"
+    },
+    {
+      "file": "wikidata-names-61d52c60a3243633.query.txt",
+      "sha256": "6f132468e60b9eab207ff1a0bedc77a1d9d6f7cad269010314f754b7a655cb94"
+    },
+    {
+      "file": "wikidata-names-644e96d699e67347.json",
+      "sha256": "943693f9929d856c776d1e3eac38e8bdc635a6fa9921ee28d0e20f7486563293"
+    },
+    {
+      "file": "wikidata-names-644e96d699e67347.query.txt",
+      "sha256": "6fbb2b00f6792efc9d65599195268c416af6f47b5ed42a3ac4461a97d085ecc4"
+    },
+    {
+      "file": "wikidata-names-652f38a73dc6519f.json",
+      "sha256": "c626a596d72bc5305d10281e18fcc1543ec3da9315cf4f63a25192ef5ea761cb"
+    },
+    {
+      "file": "wikidata-names-652f38a73dc6519f.query.txt",
+      "sha256": "64d71c66c777d5962e2a3605aad0c49cc4a08839982d5945a9aaaa60e0b6b306"
+    },
+    {
+      "file": "wikidata-names-677e1a60e68a5e22.json",
+      "sha256": "1d7ca3b054ebbaac893cfda05d7d06b2f111cd9c74abddc87da4ca3b77ab9891"
+    },
+    {
+      "file": "wikidata-names-677e1a60e68a5e22.query.txt",
+      "sha256": "5e1267986cd8f300accbfde4767dca9a18614214a198bbf558382ae0471d5345"
+    },
+    {
+      "file": "wikidata-names-68abb866e38bbbd6.json",
+      "sha256": "bf67402aa10a8a48439a327677bcc721e7c018f020b9e2b0919a4ab4de381fa8"
+    },
+    {
+      "file": "wikidata-names-68abb866e38bbbd6.query.txt",
+      "sha256": "f23cfacbd2b5b326629616ce488e5cc35844978f432363c3ceba1970d8702b23"
+    },
+    {
+      "file": "wikidata-names-6d876710c2339d83.json",
+      "sha256": "a7982d8065fd85f86e75ba178e2dcd61fec41d020d446f0603393d6d26a8af4a"
+    },
+    {
+      "file": "wikidata-names-6d876710c2339d83.query.txt",
+      "sha256": "2b13680d9f1c38c27f815ba7f990ce90e95985c261be1ab87947e9279290fc23"
+    },
+    {
+      "file": "wikidata-names-714491351c7bb42d.json",
+      "sha256": "59b97f91a1e0a9df537eb2a431823ba5a6857762df1651ecb3da4ae6e0ef4d28"
+    },
+    {
+      "file": "wikidata-names-714491351c7bb42d.query.txt",
+      "sha256": "4f3df0df5c51a7725c2b8a21b6ee2e0ef77753fa952c5a8747dc94ed5aa9d69d"
+    },
+    {
+      "file": "wikidata-names-71e90ea31d9570f0.json",
+      "sha256": "f7b042d74c204aca3358473e658fd7170aa1b60de67da561e14d606dce310c18"
+    },
+    {
+      "file": "wikidata-names-71e90ea31d9570f0.query.txt",
+      "sha256": "539bd94ae8357e8c56c6ee95a901b5d25d4d28574223886aad36dd95c0174f10"
+    },
+    {
+      "file": "wikidata-names-72f0d3acd1ea9521.json",
+      "sha256": "3d605aa95ee3c9c18406c61bb62772dd8e0f9ea63c9d90f0f861a5bde537ec27"
+    },
+    {
+      "file": "wikidata-names-72f0d3acd1ea9521.query.txt",
+      "sha256": "2213f65554b92c5d10f3e6e3b5d20e2c2f39c78dc3e66f75acb5c8dfa97737b0"
+    },
+    {
+      "file": "wikidata-names-7368e9ef429ddc55.json",
+      "sha256": "2540fe672c8fa77c0382e9d24a189238494370114bf659b5b38a2612f4ce91cd"
+    },
+    {
+      "file": "wikidata-names-7368e9ef429ddc55.query.txt",
+      "sha256": "586668b89756fb1e21964edd27321bc02741846f53534837553bd91428c1a6ed"
+    },
+    {
+      "file": "wikidata-names-763794e7ae532ff4.json",
+      "sha256": "92bac8f56d25c364c9dc33fd2bbce0aa41d116f420d73563198260b2e97994fb"
+    },
+    {
+      "file": "wikidata-names-763794e7ae532ff4.query.txt",
+      "sha256": "5c7751e952b62c7dd3b2ef15ee749f08eeaebeeedcbad63b0ddddbc69b714c1f"
+    },
+    {
+      "file": "wikidata-names-763cff530d5b6f04.json",
+      "sha256": "8470d514e0f256c432b176fd016c819e929c610ee184977c1ebeb2e52766246b"
+    },
+    {
+      "file": "wikidata-names-763cff530d5b6f04.query.txt",
+      "sha256": "2a31eac58b352c9e8a1e224e602f9ec4ec6e7448ad27887f35bd5bdda7cf083e"
+    },
+    {
+      "file": "wikidata-names-7deddf2d9de1203b.json",
+      "sha256": "31c79c580afb2dbb1863a95b6e2238e7b1656cfb83868d12d7dc8f01b3bd4114"
+    },
+    {
+      "file": "wikidata-names-7deddf2d9de1203b.query.txt",
+      "sha256": "69282e9c26f25060252ef56a626a202ceac3179f57f6820c35d0a5c48e2dd5d0"
+    },
+    {
+      "file": "wikidata-names-8e810daaef31eff3.json",
+      "sha256": "fd4cc28c70a05e85c1107f406dd157d86306f557ec8969fc91651ce08c381edc"
+    },
+    {
+      "file": "wikidata-names-8e810daaef31eff3.query.txt",
+      "sha256": "71ef480b1e0944d9ff59549095481d23708e00bc65f4298399a6955f78244ec4"
+    },
+    {
+      "file": "wikidata-names-92b74532f12f4e86.json",
+      "sha256": "7a01674bc4da8584cafb9b07c6bf8074c669e313e59ab65fec402beb8abff10d"
+    },
+    {
+      "file": "wikidata-names-92b74532f12f4e86.query.txt",
+      "sha256": "cc4347503f93f0f36081c21a2cf2077d07e542201dc9bf04323b7f54ce26c686"
+    },
+    {
+      "file": "wikidata-names-92e1f037231350f0.json",
+      "sha256": "36079dae94e9e805fc41f603c4a2ef258417ab5ca3443d8441ae76e32ed12836"
+    },
+    {
+      "file": "wikidata-names-92e1f037231350f0.query.txt",
+      "sha256": "79b0bc180c8a5b2244730e9e00843d11a653ab0b03013df3758923cc67e32ad2"
+    },
+    {
+      "file": "wikidata-names-965a5a6c61aad6e5.json",
+      "sha256": "5c4b6b340bd0a5f8ff20535e837b61e6b63e1e14a843d2746f4972d5963abfab"
+    },
+    {
+      "file": "wikidata-names-965a5a6c61aad6e5.query.txt",
+      "sha256": "991358c2c91dbcbce61aeeb6c1f44dfd2dadc6ecbdc98eaa8e6647e30559791e"
+    },
+    {
+      "file": "wikidata-names-98b465ef5451f93e.json",
+      "sha256": "8fbebd0e1ff80619e2076a1ec105b2f7d79608f4b84d227e7c7cb18447afa50b"
+    },
+    {
+      "file": "wikidata-names-98b465ef5451f93e.query.txt",
+      "sha256": "22851442165e926731d19467a853ad9431804935f89dfbcf1b88842791ce9fa1"
+    },
+    {
+      "file": "wikidata-names-9ee8f7155f8b368f.json",
+      "sha256": "3a2ee042103f36b20312cff035c3227de298f99e53c30513193089ea171185e1"
+    },
+    {
+      "file": "wikidata-names-9ee8f7155f8b368f.query.txt",
+      "sha256": "656816a86209fde15b3129f40c3c2fc5e08cea68d25ce976f1cd9fad3a56145e"
+    },
+    {
+      "file": "wikidata-names-a30e8ea84715a7f6.json",
+      "sha256": "7c8135ab865c095235b941857d56d4feebecb6a99f682d9bf73b7e7ffe3c1c00"
+    },
+    {
+      "file": "wikidata-names-a30e8ea84715a7f6.query.txt",
+      "sha256": "594cd921980dbc32a8c3f9689db7b7c4e55ac978bcc5f765a09955b21aa37a0d"
+    },
+    {
+      "file": "wikidata-names-a55d1a6dbdb74972.json",
+      "sha256": "12209b60295c08f48bf8318f38cb1e0d3e37ec3af80ad7f078202677806815ac"
+    },
+    {
+      "file": "wikidata-names-a55d1a6dbdb74972.query.txt",
+      "sha256": "a3843d4c078ca3dc02c04d765e9c3bdd7039a01e908e2e57af20f7f285e61269"
+    },
+    {
+      "file": "wikidata-names-ad1f959b79db7e57.json",
+      "sha256": "03bd4c1dae18d5a1d4faabafe4d71719913c19facf5014237b56e2bbc4342d43"
+    },
+    {
+      "file": "wikidata-names-ad1f959b79db7e57.query.txt",
+      "sha256": "69be130b11e1e254d6053e3c27261aa7ca44f8c5aa7c963427305e7465ec50f0"
+    },
+    {
+      "file": "wikidata-names-ae53274aa925bcb6.json",
+      "sha256": "c93612f5d8fad6d61376d68ce1767fca8dbde7844e3bd04e905c3347ce66a196"
+    },
+    {
+      "file": "wikidata-names-ae53274aa925bcb6.query.txt",
+      "sha256": "207e49888fa1326fb9c1a0b118ad151537fdf7b37b78a180d6d9b7c2de3926ae"
+    },
+    {
+      "file": "wikidata-names-aed4a43e34e92605.json",
+      "sha256": "3c5080de8de5f1ead5f3dd9a5996f11680e5c7ed1563ffd9606916f423d6ca5a"
+    },
+    {
+      "file": "wikidata-names-aed4a43e34e92605.query.txt",
+      "sha256": "9721a491a415e0ce64f9e8c054e1659a312bc15f0840603cfd38b45a9c717a2e"
+    },
+    {
+      "file": "wikidata-names-b15445072c44ee08.json",
+      "sha256": "4c76c4724b785fb5fa805272e2d77ce37e5a4474ef4af7359c51db52ac4111c5"
+    },
+    {
+      "file": "wikidata-names-b15445072c44ee08.query.txt",
+      "sha256": "00ee4353925e939d5557d7375614223bc01aa5bd69af8bdc82a77557a397a199"
+    },
+    {
+      "file": "wikidata-names-b47b2e0d0b70e192.json",
+      "sha256": "79e445959d4699a046bf46d8e9af00b2e11ecc9a6bfdc58ec9aa9577138101a4"
+    },
+    {
+      "file": "wikidata-names-b47b2e0d0b70e192.query.txt",
+      "sha256": "ed706160acff4d9b385db1806e7dbe06d5d10abdb0bc97e776cb3e483ba3de45"
+    },
+    {
+      "file": "wikidata-names-b82ac8a7b68b08f1.json",
+      "sha256": "71cbc7c1b887f0d93ffb931e9eb9e028d9fa490410e50be5bd94368f129f41f6"
+    },
+    {
+      "file": "wikidata-names-b82ac8a7b68b08f1.query.txt",
+      "sha256": "35f53dc9130c8899c35952f23d6992c5eebe1207d018d6529358d9dd03c7fff1"
+    },
+    {
+      "file": "wikidata-names-b869f9b99c91c06f.json",
+      "sha256": "39a50a1eec9edd183ec4ee3c51d6bcc9420075a96c2f2655fbf7f636fdec75c6"
+    },
+    {
+      "file": "wikidata-names-b869f9b99c91c06f.query.txt",
+      "sha256": "0fe6883faecec4d732cafa7724f1b45ce026b97f6f435b457d3989d645925e84"
+    },
+    {
+      "file": "wikidata-names-c205d9ed8d02459d.json",
+      "sha256": "b974ef044201abad37921c110cb782eba6e67aab9f6da75cfecfa37b4c50496a"
+    },
+    {
+      "file": "wikidata-names-c205d9ed8d02459d.query.txt",
+      "sha256": "795183203187921f542dce57ee64cd2aae7cf5640743c44e1735cfb9c183a2ba"
+    },
+    {
+      "file": "wikidata-names-c2e8b725e6889ec3.json",
+      "sha256": "8665e1e66d7412d240ed14791fe0195dad6a39fded04fe0356d37d2bd17638ae"
+    },
+    {
+      "file": "wikidata-names-c2e8b725e6889ec3.query.txt",
+      "sha256": "dbf8e78d1435e44d06d7e341435ebae6851cef6935f674c2f32f387a0ae2f70d"
+    },
+    {
+      "file": "wikidata-names-cac4395a394b6664.json",
+      "sha256": "c959b0824b2165b627bc38749c888a02517ae7eec2ae404ec11d23a4535f5dd9"
+    },
+    {
+      "file": "wikidata-names-cac4395a394b6664.query.txt",
+      "sha256": "dd7ed069d822677b001ec296858d72651df02e2a9d805f856b2ca542306ca6fb"
+    },
+    {
+      "file": "wikidata-names-cb4064c9b94961ea.json",
+      "sha256": "04bcbf809fe3f6f77a7969ed0daa2db4de6a4d32790a40c4c11af0f02fcbdf51"
+    },
+    {
+      "file": "wikidata-names-cb4064c9b94961ea.query.txt",
+      "sha256": "37be04940928341ccd5fe75eca95ba2949de597d906140dc2a4c7b53369818b0"
+    },
+    {
+      "file": "wikidata-names-d5aa4445c82316cf.json",
+      "sha256": "518d079e5e56f814419bb385e7eaf0fc2754c172757baacb83d118568503012a"
+    },
+    {
+      "file": "wikidata-names-d5aa4445c82316cf.query.txt",
+      "sha256": "cc86b454174f35bdd17e4629265285fb3b7e3a1b5acf95454d6214b71bc3b675"
+    },
+    {
+      "file": "wikidata-names-d96dfbbac44cf941.json",
+      "sha256": "216f5d77b5f82b1a8c636aad9049fd90512738c5503c6dd38a4b6046cdcd5390"
+    },
+    {
+      "file": "wikidata-names-d96dfbbac44cf941.query.txt",
+      "sha256": "c4d193b4ac90a339ac8fa6f79034566a021006150a3f2d886f324f21c43e6c66"
+    },
+    {
+      "file": "wikidata-names-da7dbf4c395ca7cf.json",
+      "sha256": "659a75a915dd2cd87ec54d85031753aeade09d45da6bcbfa1a1cf77fe54d5eca"
+    },
+    {
+      "file": "wikidata-names-da7dbf4c395ca7cf.query.txt",
+      "sha256": "11849cfa40f6378a87dfd15928cbb351f3a3ddab223ba36f0e339671d3b53afc"
+    },
+    {
+      "file": "wikidata-names-e4907846268080b5.json",
+      "sha256": "4727a6be471dcd1402ca0fccc9eb197e91cceb53d7ff55f0ea0d30eca1c51ede"
+    },
+    {
+      "file": "wikidata-names-e4907846268080b5.query.txt",
+      "sha256": "b36cb2a76d8b2b018ee913a82f7058851d9b21f86c237723a5793b67f6eea53c"
+    },
+    {
+      "file": "wikidata-names-e4bcba6616ea23d6.json",
+      "sha256": "c374e3f4df0d76fc314f80fe88421c149e129e9dfb5bdedbed0896aa65e552d4"
+    },
+    {
+      "file": "wikidata-names-e4bcba6616ea23d6.query.txt",
+      "sha256": "9d26394e87d04f86d6e61b1bdf2b264bd5dd43b4acad168b10ac2c303b87ac3e"
+    },
+    {
+      "file": "wikidata-names-ea0c85b2e93531c9.json",
+      "sha256": "a9892f33ad95a0f1914c9f741be48511cdc1927a8e38bf6223f5b1f463ef4ac7"
+    },
+    {
+      "file": "wikidata-names-ea0c85b2e93531c9.query.txt",
+      "sha256": "388b1de24be5b6201a089544945f79d96a85807345e5668a4237791389371ab6"
+    },
+    {
+      "file": "wikidata-names-eb157e5ed8d5c9d5.json",
+      "sha256": "7ba04f62763b806c9ded9cbbe2fc64628e8dc2cadb96afed569a7ee14048f708"
+    },
+    {
+      "file": "wikidata-names-eb157e5ed8d5c9d5.query.txt",
+      "sha256": "abced6e5eeb171529a2532ded08c40c9ab746d1c4f837bc75ecec8bd312dfbd0"
+    },
+    {
+      "file": "wikidata-names-ef44c355e0ec220e.json",
+      "sha256": "a9ff7cee8169ac20eaf6c117363c71606ba33f558cf8ad35cc8960d8beaab7ea"
+    },
+    {
+      "file": "wikidata-names-ef44c355e0ec220e.query.txt",
+      "sha256": "0c10a8a9785ea6be7ac4fd40f47d2cb04f1613984365893f710fdfd045a82a9b"
+    },
+    {
+      "file": "wikidata-names-fbe8f69e520b4bdf.json",
+      "sha256": "e1bb9ed0f8dc908108f4b68bc841db5542c7b5511aa1a0d63531eddbc4b02a59"
+    },
+    {
+      "file": "wikidata-names-fbe8f69e520b4bdf.query.txt",
+      "sha256": "49dcd392edd7ecd162d54bc2a573f5a28c43b8612cff76274027acca05635128"
+    },
+    {
+      "file": "wikidata-operating-systems.json",
+      "sha256": "96902cd66c67fbd06581cfd32348e2be93d2342959181cb00a41c5130efb982e"
+    },
+    {
+      "file": "wikidata-operating-systems.query.txt",
+      "sha256": "9f87c6a369235cdb608a4cddf69cbdc97725521ffcc6d2a1d066ef0caa0631d0"
+    },
+    {
+      "file": "wikidata-public-companies.json",
+      "sha256": "4164bae8adeaff410359c492948710ae004bc9d63d19f501627a2c01c7e293c9"
+    },
+    {
+      "file": "wikidata-public-companies.query.txt",
+      "sha256": "f49e4e38705c4647b4cb407d5db18ac74f0a95b8204cab9edc8bcc018ba3eba9"
+    },
+    {
+      "file": "wikidata-software.json",
+      "sha256": "d0ae9946b949aa3459d25be374696db6cc279e4b8e70d897d2635cadf158bc12"
+    },
+    {
+      "file": "wikidata-software.query.txt",
+      "sha256": "be8ef8dd3a08a5dddc9b2a1051292bb4dd13b8f554fd629cf6131e6c07082caa"
+    },
+    {
+      "file": "wikidata-video-games.json",
+      "sha256": "bd0e0efba2600690c0a407fec8f3af31f5c8adb47936f30084ec92597f0db3cc"
+    },
+    {
+      "file": "wikidata-video-games.query.txt",
+      "sha256": "9da1bcbadb1480b686b4cd015d56a464f80df878562871431bef8463b8143c92"
+    }
+  ],
+  "weights": {
+    "en": 200,
+    "en_alias": 150,
+    "zh": 0
+  },
+  "wikidata_classes": {
+    "brands": [
+      "Q431289",
+      "品牌"
+    ],
+    "companies": [
+      "Q783794",
+      "公司"
+    ],
+    "languages": [
+      "Q9143",
+      "程式語言"
+    ],
+    "manufacturers": [
+      "Q187939",
+      "製造商"
+    ],
+    "operating-systems": [
+      "Q9135",
+      "作業系統"
+    ],
+    "public-companies": [
+      "Q891723",
+      "上市公司"
+    ],
+    "software": [
+      "Q7397",
+      "軟體"
+    ],
+    "video-games": [
+      "Q7889",
+      "電子遊戲"
+    ]
+  }
+}

@@ -17,6 +17,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 | `Sources/main.swift` | IMKInputController、按鍵路由、marked text 與提交生命週期 |
 | `Sources/IME/Models/UnifiedCompositionEngine.swift` | 共用組字狀態與多語言預測 |
 | `Sources/IME/Models/CompositionPresentation.swift` | 共用候選合併與去重、預覽、正文與游標位置 |
+| `Sources/IME/Models/SymbolCandidates.swift` | 標點快捷鍵與同類符號候選 |
 | `Sources/IME/Models/LanguageTypes.swift` | 來源按鍵範圍、確認狀態與候選身分 |
 | `Sources/IME/Models/MixedMergeSupport.swift` | 中英來源範圍對齊與局部合併 |
 | `../phoneticIME/Sources/PhoneticIMEEngine.swift` | 注音音節、選字鎖定與上下文保留 |
@@ -67,6 +68,14 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 重播快取集中限制為最近 64 筆檢查點，獨立保留編輯後的基準狀態。復原快照保存基準與組字狀態，不複製整份重播快取；缺少檢查點時可從基準重建。中英合併排程使用停頓辨識設定，重設或重新建立編輯基準時取消舊排程。
 
 目前採用既有 Swift 引擎實作上述來源範圍與狀態管理，尚未連結 librime 核心或載入 Rime schema。
+
+## 詞庫與符號
+
+`scripts/import_lexicons.py`（專案根目錄下）下載教育部／萌典及 Wikidata 快照，將新增詞寫入既有 `phrase_map.tsv`、`english_words.tsv`，沿用目前引擎的載入方式。中文同時對 common／phrase 去重，英文以查詢鍵與顯示文字去重；正式名稱先於別名處理。新增中文權重為 0，英文正式名稱為 200、別名為 150，不改寫既有詞條權重。
+
+逐詞來源位於 `lexicons/imported_entries.jsonl`，來源版本與雜湊位於 `lexicons/import_manifest.json`。重新匯入只移除工具前次產生且未被修改的完整行；若偵測到人工修改或移除，停止處理。原始下載快照保留於本機 `data/lexicon-import/`。操作及授權請參考 [開放詞庫說明](../lexicons/README.md)。
+
+`SymbolCandidates` 統一管理標點快捷鍵與同類變體。符號保留在共用組字狀態內，候選沿用既有替換與復原流程；尚未提交前，可移回符號位置重新選取。Ctrl／Cmd 的攔截僅限指定標點鍵，其餘快捷鍵交給應用程式。
 
 ## 模型與設定
 
