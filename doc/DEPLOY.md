@@ -62,6 +62,14 @@ DMG 內含「安裝全一輸入法.app」與安裝說明。安裝程式與掛載
 
 `UNIFYIME_SKIP_NOTARIZE=1` 僅用於本機封裝，產物檔名會標示 `LOCAL-ONLY`。舊的 `scripts/build-release-notarize.command` 是本機部署流程；正式 DMG 請使用根目錄 `pack.command`。
 
+## 應用程式內更新
+
+「關於 → 版本更新」呼叫 GitHub 最新正式 Release API，按 BUILD 的數字欄位比較版本；目前版本相同或較新時不下載。使用者確認後，依執行架構選擇 `UnifyIME-版本-build-時間-架構.dmg`。
+
+`ReleaseUpdater` 驗證 HTTPS 下載來源、檔案大小與 GitHub 提供的 SHA-256；沒有 digest 時使用同名 `.dmg.sha256` 附件。映像以唯讀方式掛載，安裝程式複製到獨立暫存目錄，核對安裝程式及 payload 的簽章、Gatekeeper 評估、Bundle ID、BUILD 版號、最低 macOS 版本與架構後，卸載映像再啟動安裝程式。安裝程式沿用既有備份、失敗還原與重新載入流程，不由正在執行的輸入法覆蓋自身。
+
+此流程只在按鈕觸發時查詢，不在背景自動安裝。驗證失敗時不啟動安裝；交接成功的安裝程式保留於系統暫存目錄，供獨立程序完成操作。GitHub API 格式參考 [官方 Release API 文件](https://docs.github.com/en/rest/releases/releases)。
+
 ## Reload 原則
 
 build 後一定要 reload。

@@ -1,8 +1,6 @@
 import AppKit
 import WebKit
 
-private let githubReleasesURL = URL(string: "https://github.com/VaderChen/UnifyIME/releases")!
-
 /// 偏好設定以本機網頁呈現；輸入法狀態仍由既有 Swift 設定介面管理。
 final class PreferencesWindowController: NSWindowController, NSWindowDelegate, WKNavigationDelegate, WKScriptMessageHandlerWithReply {
     static let shared = PreferencesWindowController()
@@ -10,6 +8,8 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
     private let pageURL: URL?
     private let readOnly: Bool
     private var selectedSection = "general"
+    private var updateBusy = false
+    private var updateStatus = ""
 #if DEBUG
     private var debugRefreshTimer: Timer?
     private static let debugMetricLabels = [
@@ -39,7 +39,6 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         window.maxSize = NSSize(width: 740, height: 540)
         window.center()
         super.init(window: window)
-        checkForReleaseUpdateIfDue()
         shouldCascadeWindows = false
         window.delegate = self
         window.contentView = webView
@@ -54,20 +53,52 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         }
     }
 
-    private func checkForReleaseUpdateIfDue() {
-        let key = "FastChIME.lastReleaseCheck"
-        let now = Date().timeIntervalSince1970
-        let last = UserDefaults.standard.double(forKey: key)
-        guard now - last >= 12 * 60 * 60 else { return }
-        UserDefaults.standard.set(now, forKey: key)
-        var request = URLRequest(url: URL(string: "https://api.github.com/repos/VaderChen/UnifyIME/releases/latest")!)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: request) { data, _, error in
-            guard error == nil, let data,
-                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tag = payload["tag_name"] as? String else { return }
-            NSLog("FastChIME release check: latest=\(tag)")
-        }.resume()
+    private func checkForUpdates() {
+        guard !readOnly, !updateBusy else { return }
+        updateBusy = true
+        updateStatus = "正在檢查更新…"
+        publishState()
+        Task { @MainActor in
+            defer { updateBusy = false; publishState() }
+            var preparedInstaller: URL?
+            do {
+                let current = Self.formattedBuildVersionString()
+                guard let update = try await ReleaseUpdater.latest(current: current) else {
+                    updateStatus = "目前已是最新版本"
+                    return
+                }
+                updateStatus = "找到新版 \(update.version.display)"
+                publishState()
+                let alert = NSAlert()
+                alert.messageText = "發現新版全一輸入法"
+                alert.informativeText = "目前版本：\(current)\n最新版本：\(update.version.display)\n\n確認後將下載並安裝，完成時會重新啟動輸入法。請先送出尚未完成的文字；個人詞頻與偏好設定會保留。"
+                alert.addButton(withTitle: "下載並安裝")
+                alert.addButton(withTitle: "稍後")
+                guard alert.runModal() == .alertFirstButtonReturn else {
+                    updateStatus = "已取消更新"
+                    return
+                }
+                updateStatus = "正在下載並驗證更新…"
+                publishState()
+                let installer = try await ReleaseUpdater.prepare(update)
+                preparedInstaller = installer
+                updateStatus = "正在啟動安裝程式…"
+                publishState()
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = true
+                configuration.createsNewApplicationInstance = true
+                _ = try await NSWorkspace.shared.openApplication(at: installer, configuration: configuration)
+                updateStatus = "安裝程式已啟動，完成後會重新載入輸入法"
+            } catch {
+                if let preparedInstaller { try? FileManager.default.removeItem(at: preparedInstaller.deletingLastPathComponent()) }
+                updateStatus = "更新未完成，請重試"
+                let alert = NSAlert()
+                alert.messageText = "無法完成版本更新"
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: "好")
+                alert.runModal()
+            }
+        }
     }
 
     @available(*, unavailable)
@@ -120,8 +151,9 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
             updateDebugTimer()
 #endif
             replyHandler(snapshot(), nil)
-        case "openReleases":
-            NSWorkspace.shared.open(githubReleasesURL)
+        case "checkForUpdates":
+            guard !readOnly else { replyHandler(nil, "唯讀預覽不會執行更新。"); return }
+            checkForUpdates()
             replyHandler(snapshot(), nil)
         case "set":
             guard !readOnly else { replyHandler(nil, "唯讀預覽不會變更設定。"); return }
@@ -195,7 +227,8 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
             "values": ["engine": currentCandidateEngineMode.rawValue, "alignment": currentCandidateCursorAlignment.rawValue,
                        "pause": currentPauseRecognitionMode.rawValue, "chinese": language(chineseLanguageDefaultsKey, .bopomofo),
                        "english": language(englishLanguageDefaultsKey, .english), "japanese": CompositionLanguageSetting.disabled.rawValue],
-            "version": Self.formattedBuildVersionString()
+            "version": Self.formattedBuildVersionString(),
+            "updateBusy": updateBusy, "updateStatus": updateStatus
         ]
 #if DEBUG
         result["profiling"] = isRuntimeProfilingEnabled
