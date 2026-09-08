@@ -271,7 +271,7 @@ struct EnglishIMEEngine: CompositionLanguageBehavior {
         let presentation = CompositionPresentationBuilder.build(
             baseSegments: baseSegments,
             totalReadings: state.allReadings.count + (state.currentReading.isEmpty ? 0 : 1),
-            insertionIndex: state.readings.count + (state.currentReading.isEmpty ? 0 : 1),
+            insertionIndex: state.currentCompositionCursorIndex() + (state.currentReading.isEmpty ? 0 : 1),
             selectedCandidateIndex: state.selectedCandidateIndex,
             visibleCandidateLimit: 20
         ) { focus, _ in

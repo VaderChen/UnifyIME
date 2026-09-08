@@ -306,28 +306,29 @@ var isRuntimeProfilingEnabled: Bool {
 var cachedCandidateEngineMode: CandidateEngineMode?
 var currentCandidateEngineMode: CandidateEngineMode {
     get {
-        if let cachedCandidateEngineMode {
+        if let cachedCandidateEngineMode, cachedCandidateEngineMode.isSupported {
             return cachedCandidateEngineMode
         }
-        if let raw = try? String(contentsOf: candidateEngineModeStateURL, encoding: .utf8)
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           let resolved = CandidateEngineMode(rawValue: raw) {
-            cachedCandidateEngineMode = resolved
-            return resolved
-        }
-        let raw = imeDefaults.string(forKey: candidateEngineModeDefaultsKey)
-        let resolved = CandidateEngineMode(rawValue: raw ?? "") ?? .aiPreferredTraditionalAssist
-        cachedCandidateEngineMode = resolved
+        let stored = (try? String(contentsOf: candidateEngineModeStateURL, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? imeDefaults.string(forKey: candidateEngineModeDefaultsKey)
+        let requested = CandidateEngineMode(rawValue: stored ?? "")
+        let resolved = requested.flatMap { $0.isSupported ? $0 : nil } ?? .traditionalPreferredAIAssist
+        // 載入時一併遷移舊值，讓介面與引擎使用同一個支援模式。
+        persistCandidateEngineMode(resolved)
         return resolved
     }
-    set {
-        cachedCandidateEngineMode = newValue
-        imeDefaults.set(newValue.rawValue, forKey: candidateEngineModeDefaultsKey)
-        imeDefaults.synchronize()
-        try? FileManager.default.createDirectory(at: candidateEngineModeStateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? (newValue.rawValue + "\n").write(to: candidateEngineModeStateURL, atomically: true, encoding: .utf8)
-        appendRuntimeTrace("candidateEngineMode.set value=\(newValue.rawValue)")
-    }
+    set { persistCandidateEngineMode(newValue) }
+}
+
+private func persistCandidateEngineMode(_ requested: CandidateEngineMode) {
+    let resolved = requested.isSupported ? requested : .traditionalPreferredAIAssist
+    cachedCandidateEngineMode = resolved
+    imeDefaults.set(resolved.rawValue, forKey: candidateEngineModeDefaultsKey)
+    imeDefaults.synchronize()
+    try? FileManager.default.createDirectory(at: candidateEngineModeStateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? (resolved.rawValue + "\n").write(to: candidateEngineModeStateURL, atomically: true, encoding: .utf8)
+    appendRuntimeTrace("candidateEngineMode.set value=\(resolved.rawValue)")
 }
 
 extension CandidateController {
@@ -439,6 +440,9 @@ func runtimePerCharacterSnapshot() -> RuntimePerCharacterSnapshot? {
     runtimeProfileLock.unlock()
     return snapshot
 }
+
+// 完整選字內容須獨立明確啟用，一般詞頻學習不受此開關影響。
+let isSelectionLoggingEnabled = processEnv["UNIFYIME_SELECTION_LOG_ENABLED"] == "1"
 
 func appendJSONL(_ object: [String: Any], to url: URL) {
     try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

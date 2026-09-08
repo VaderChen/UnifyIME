@@ -36,7 +36,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         let detectedEnglishCandidates: [(rawStart: Int, rawEnd: Int, text: String)]
         let targetState: MultiTargetCompositionState
         let replayedRawTokenCount: Int
-        let rawReplayStateCache: [String: MultiTargetCompositionState]
+        let rawReplayBaseline: MultiTargetCompositionState
         let cachedRawInputBuffer: String?
     }
 
@@ -103,6 +103,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     private var pendingRawReplayWorkItem: DispatchWorkItem?
     private var pendingMergeWorkItem: DispatchWorkItem?
     private var replayedRawTokenCount = 0
+    private var rawReplayBaseline = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
+    private var rawReplayCacheOrder: [String] = []
+    private let rawReplayCacheLimit = 64
     private var rawReplayStateCache: [String: MultiTargetCompositionState] = [:]
     private var cachedRawInputBuffer: String?
     private var compositionUndoStack: [CompositionUndoSnapshot] = []
@@ -117,6 +120,18 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
     private func rawReplayCacheKey(for tokens: [String]) -> String {
         tokens.joined(separator: "\u{1F}")
+    }
+
+    private func cacheRawReplayState(_ state: MultiTargetCompositionState, for tokens: [String]) {
+        let key = rawReplayCacheKey(for: tokens)
+        guard !key.isEmpty else { return }
+        if rawReplayStateCache[key] == nil {
+            rawReplayCacheOrder.append(key)
+        }
+        rawReplayStateCache[key] = state
+        while rawReplayCacheOrder.count > rawReplayCacheLimit {
+            rawReplayStateCache.removeValue(forKey: rawReplayCacheOrder.removeFirst())
+        }
     }
 
     private func makeCompositionUndoSnapshot() -> CompositionUndoSnapshot {
@@ -138,7 +153,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             detectedEnglishCandidates: detectedEnglishCandidates,
             targetState: targetState,
             replayedRawTokenCount: replayedRawTokenCount,
-            rawReplayStateCache: rawReplayStateCache,
+            rawReplayBaseline: rawReplayBaseline,
             cachedRawInputBuffer: cachedRawInputBuffer
         )
     }
@@ -183,7 +198,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         detectedEnglishCandidates = snapshot.detectedEnglishCandidates
         targetState = snapshot.targetState
         replayedRawTokenCount = snapshot.replayedRawTokenCount
-        rawReplayStateCache = snapshot.rawReplayStateCache
+        rawReplayBaseline = snapshot.rawReplayBaseline
+        rawReplayStateCache = [:]
+        rawReplayCacheOrder = []
         cachedRawInputBuffer = snapshot.cachedRawInputBuffer
         suppressCommitUntil = Date.distantPast
         if hasComposition {
@@ -216,7 +233,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             }
         }
         pendingMergeWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + currentPauseRecognitionMode.interval, execute: item)
     }
 
     private func flushPendingMerge() {
@@ -259,10 +276,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             pendingRawReplayWorkItem = nil
             pendingMergeWorkItem?.cancel()
             pendingMergeWorkItem = nil
-            // rawReplayStateCache contains the unmerged state for every raw
-            // prefix. Keep it after materializing the mixed presentation so
-            // the next key only feeds the new suffix instead of replaying the
-            // entire long sentence from the first key again.
+            // 保留最近的未合併檢查點，下一鍵只重播新增後綴。
             replayedRawTokenCount = rawInputTokens.count
             invalidateSnapshot()
             mergedCompositionActive = true
@@ -272,22 +286,22 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         }
     }
 
-    private func rebuildTargetsFromRawInputBuffer() {
+    private func rebuildTargetsFromRawInputBuffer(mergeImmediately: Bool = true) {
         let tokens = rawInputTokens
         let buffer = rawInputBuffer
         guard !tokens.isEmpty else {
-            targetState = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
+            targetState = rawReplayBaseline
             rawReplayStateCache = [:]
-            rawReplayStateCache[""] = targetState
+            rawReplayCacheOrder = []
             applyMultiTargetState(targetState)
-            recomputeRawSpanMerge()
+            if mergeImmediately { recomputeRawSpanMerge() }
             appendRuntimeTrace("rebuildTargets buffer=(empty)")
             return
         }
 
         let currentKey = rawReplayCacheKey(for: tokens)
         var startIndex = 0
-        var workingState = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
+        var workingState = rawReplayBaseline
         if let cached = rawReplayStateCache[currentKey] {
             workingState = cached
             startIndex = tokens.count
@@ -307,41 +321,18 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             UnifiedCompositionEngine.feedAll(token: token, state: &mutable)
             workingState = mutable
             let consumed = Array(tokens.prefix(startIndex + 1))
-            if rawReplayStateCache.count > 64 {
-                rawReplayStateCache.removeAll()
-                rawReplayStateCache[""] = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
-            }
-            rawReplayStateCache[rawReplayCacheKey(for: consumed)] = workingState
+            cacheRawReplayState(workingState, for: consumed)
             startIndex += 1
         }
 
         targetState = workingState
-        if rawReplayStateCache[""] == nil {
-            rawReplayStateCache[""] = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
-        }
         replayedRawTokenCount = tokens.count
         applyMultiTargetState(targetState)
-        recomputeRawSpanMerge()
+        if mergeImmediately { recomputeRawSpanMerge() }
         if isRuntimeTraceEnabled {
             let primaryPrediction = unifiedPrediction()
             appendRuntimeTrace("rebuildTargets buffer=\(buffer) primaryMarked=\(primaryPrediction.presentation.markedText)")
         }
-    }
-
-    private func scheduleRawReplay() {
-        pendingRawReplayWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.firePendingRawReplay()
-        }
-        pendingRawReplayWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + currentPauseRecognitionMode.interval, execute: workItem)
-    }
-
-    private func firePendingRawReplay() {
-        pendingRawReplayWorkItem = nil
-        rebuildTargetsFromRawInputBuffer()
-        refreshMarkedTextIfPossible()
     }
 
     func refreshMarkedTextIfPossible() {
@@ -360,21 +351,29 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     private func resetRawReplayState() {
+        pendingMergeWorkItem?.cancel()
+        pendingMergeWorkItem = nil
         pendingRawReplayWorkItem?.cancel()
         pendingRawReplayWorkItem = nil
         rawInputTokens = []
         cachedRawInputBuffer = nil
         replayedRawTokenCount = 0
         rawReplayStateCache = [:]
+        rawReplayCacheOrder = []
+        rawReplayBaseline = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
     }
 
     private func rebaseRawReplayOnCurrentState() {
+        pendingMergeWorkItem?.cancel()
+        pendingMergeWorkItem = nil
         pendingRawReplayWorkItem?.cancel()
         pendingRawReplayWorkItem = nil
         rawInputTokens = []
         cachedRawInputBuffer = nil
         replayedRawTokenCount = 0
-        rawReplayStateCache = ["": targetState]
+        rawReplayBaseline = targetState
+        rawReplayStateCache = [:]
+        rawReplayCacheOrder = []
     }
 
     private func unifiedState() -> UnifiedCompositionState {
@@ -1194,7 +1193,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             // 中間輸入時 readings 只有左側前綴，右側仍保存在 trailingReadings。
             // 取消第一個未完成音節，不代表整段組字已清空。
             let willClearComposition = !currentReading.isEmpty
-                ? allReadings.isEmpty
+                ? allReadings.isEmpty && currentReading.count == 1
                 : allReadings.count == 1 && currentCompositionCursorIndex() > 0
             appendRuntimeTrace("backspace decision willClear=\(willClearComposition)")
             if willClearComposition {
@@ -1202,8 +1201,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
                 UnifiedCompositionEngine.reset(state: &state)
                 applyUnifiedState(state)
                 targetState = MultiTargetCompositionState(targets: CompositionLanguageRegistry.targets)
-                rawInputTokens = []
-                cachedRawInputBuffer = nil
+                resetRawReplayState()
                 clearMarkedText(client)
                 CompositionPanelController.shared.hide()
                 IMEUIController.shared.clear()
@@ -1251,22 +1249,14 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             rawInputTokens.append(chars)
             cachedRawInputBuffer = nil
             if mergedCompositionActive {
-                // Rebuild from scratch so we don't feed into a merged state.
-                rebuildTargetsFromRawInputBuffer()
+                rebuildTargetsFromRawInputBuffer(mergeImmediately: false)
+                mergedCompositionActive = false
+                detectedEnglishCandidates = []
             } else {
                 feedUnified(token: chars)
-                rawReplayStateCache[rawReplayCacheKey(for: rawInputTokens)] = targetState
-                // Run merge synchronously when buffer contains English chars
-                let buf = rawInputBuffer
-                if buf.unicodeScalars.contains(where: { englishMergeTriggerSet.contains($0) }),
-                   buf.count <= maxMixedRawBufferLength {
-                    pendingMergeWorkItem?.cancel()
-                    pendingMergeWorkItem = nil
-                    recomputeRawSpanMerge()
-                } else {
-                    scheduleMergeCheck()
-                }
+                cacheRawReplayState(targetState, for: rawInputTokens)
             }
+            scheduleMergeCheck()
             updateMarkedText(client)
             if focusedTraceRawTokens.contains(chars) {
                 appendFocusedTrace("mapped chars=\(chars) after readings=\(readings.joined(separator: "/")) current=\(currentReading) composing=\(composingBuffer) selected=\(selectedCandidateIndex) candidateMode=\(candidateMode)")
@@ -1337,7 +1327,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             publishIMEState("", anchor: nil)
             IMEUIController.shared.clear()
         } else {
-            NSLog("Marked %@ candidates=%@", displayed.map(\.value).joined(), candidates.joined(separator: "|"))
             imeDebugLog("updateMarkedText marked=\(displayed.map(\.value).joined()) candidates=\(candidates.count) values=\(candidates.joined(separator: "|"))")
             let safeIndex = min(selectedCandidateIndex, max(candidates.count - 1, 0))
             switch currentCandidateWindowMode {
@@ -1838,7 +1827,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         }
         appendFocusedTrace("commit.sync reason=\(reason) selectedIndex=\(selectedCandidateIndex) selectedValue=\(selectedValue) candidateMode=\(candidateMode) output=\(output) markedText=\(snap.markedText) \(focusTrace) candidates=\(candidates.joined(separator: "|"))")
         appendRuntimeTrace("commitCurrentComposition output=\(output) rawBuffer=\(rawInputBuffer)")
-        NSLog("Committing readings %@ current=%@ -> %@", allReadings.joined(separator: " / "), currentReading, output)
 
         // 自動提交不記為使用者選字；提交前須清除原始按鍵及延遲重播。
         resetRawReplayState()
@@ -1933,7 +1921,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         appendFocusedTrace("commitCandidate.after advance=\(advance) reachedEnd=\(reachedEnd) overrides=\(overrideTrace) segments=\(segmentTrace)")
         logUserSelection(
             allReadings: selectionReadings,
-            focus: focus,
+            entry: entry,
             candidates: candidates,
             candidateEntries: selectionEntries,
             displayedSegments: selectionSegments,
@@ -1941,7 +1929,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             chosenIndex: index,
             chosen: chosen
         )
-        UserFrequencyStore.record(languageID: focus.languageID, reading: focus.reading, surface: chosen)
+        UserFrequencyStore.record(languageID: entry.languageID, reading: entry.replacementKey.reading, surface: chosen)
         selectedCandidateIndex = 0
         candidateMode = false
         return reachedEnd ? .confirmedAndReachedEnd : .confirmed
@@ -1969,7 +1957,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
 
     private func logUserSelection(
         allReadings: [String],
-        focus: ComposedSegment,
+        entry: CandidateEntry,
         candidates: [String],
         candidateEntries: [CandidateEntry],
         displayedSegments: [ComposedSegment],
@@ -1977,6 +1965,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         chosenIndex: Int,
         chosen: String
     ) {
+        guard isSelectionLoggingEnabled else { return }
+        let focus = entry.replacementKey
         let top1 = candidates.first ?? ""
         let focusEnd = focus.start + focus.length
         let precedingValues = displayedSegments
@@ -2015,7 +2005,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             "selection_sequence": selectionSequence,
             "timestamp": ISO8601DateFormatter().string(from: Date()),
             "record_source": "runtime_user_selection",
-            "language_id": focus.languageID,
+            "language_id": entry.languageID,
             "reading": focus.reading,
             "surface": chosen,
             "chosen_index": chosenIndex,

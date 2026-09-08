@@ -305,14 +305,14 @@ enum PhoneticIMECore {
 
     static func pressDeleteForward(state: inout UnifiedCompositionState) {
         if !state.currentReading.isEmpty {
-            state.currentReading.removeLast()
-            if state.currentReading.isEmpty, !state.trailingReadings.isEmpty {
-                let restoreCursor = state.readings.count
-                state.readings.append(contentsOf: state.trailingReadings)
-                state.trailingReadings = []
-                state.compositionCursorIndex = restoreCursor
-            }
+            // 未完成音節保留；Delete 只刪除插入點右側的已完成音節。
+            guard !state.trailingReadings.isEmpty else { return }
+            let deleteIndex = state.readings.count
+            state.rebaseOverrides(replacing: deleteIndex..<(deleteIndex + 1), insertedCount: 0)
+            state.trailingReadings.removeFirst()
+            state.rawReadingSymbols = (state.readings.joined() + state.currentReading + state.trailingReadings.joined()).map { String($0) }
             state.selectedCandidateIndex = 0
+            pruneOverrides(state: &state)
             return
         }
         if !state.trailingReadings.isEmpty {

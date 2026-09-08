@@ -47,11 +47,13 @@ enum CompositionPresentationBuilder {
             let nextTokenOffset = tokenOffset + segment.length
             if insertionIndex <= nextTokenOffset {
                 let localTokenCount = max(0, insertionIndex - tokenOffset)
-                let localCharAdvance = min(segment.value.count, localTokenCount)
-                return charOffset + localCharAdvance
+                // 詞段尾端必須走到完整文字末尾；內部只落在完整字元邊界。
+                let localCharAdvance = localTokenCount >= segment.length
+                    ? segment.value.count : min(segment.value.count, localTokenCount)
+                return charOffset + segment.value.prefix(localCharAdvance).utf16.count
             }
             tokenOffset = nextTokenOffset
-            charOffset += segment.value.count
+            charOffset += segment.value.utf16.count
         }
         return charOffset
     }
