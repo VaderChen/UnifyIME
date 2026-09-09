@@ -129,7 +129,10 @@ enum PhoneticIMECore {
             }
             for (rawKey, symbol) in zip(token.lowercased().map(String.init), mapped.map(String.init)) {
                 let reordered = BopomofoOrderCorrection.appending(symbol, to: state.currentReading)
-                if reordered == nil && SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol) {
+                // 聲調先到但音節不合法時，允許後續按鍵逐步補齊並重排；
+                // 無法修復就保留原音節，避免污染下一個音節。
+                let pendingTone = state.currentReading.contains { "ˇˋˊ˙".contains($0) }
+                if reordered == nil && (pendingTone || SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol)) {
                     finalizeCurrentReading(state: &state)
                 }
                 if state.currentReading.isEmpty,
@@ -148,7 +151,8 @@ enum PhoneticIMECore {
                 state.pendingRawInput.append(rawKey)
                 state.selectedCandidateIndex = 0
                 state.rawReadingSymbols = state.readings.joined().map { String($0) }
-                if "ˇˋˊ˙".contains(symbol) {
+                if state.currentReading.contains(where: { "ˇˋˊ˙".contains($0) }),
+                   BopomofoOrderCorrection.normalize(state.currentReading) != nil {
                     finalizeCurrentReading(state: &state)
                 }
             }
