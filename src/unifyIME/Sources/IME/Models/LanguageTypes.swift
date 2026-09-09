@@ -75,6 +75,11 @@ struct CandidateIdentity: Hashable {
 }
 
 extension CandidateEntry {
+    /// 原讀音候選沿用原替換範圍，作為明確選取的文字，不參與中文字排序。
+    var isBopomofoLiteral: Bool {
+        !text.isEmpty && text == replacementKey.reading &&
+            text.allSatisfy { "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦˊˇˋ˙".contains($0) }
+    }
     var identity: CandidateIdentity {
         CandidateIdentity(text: text, languageID: languageID, replacementKey: replacementKey,
             replacementReadings: replacementReadings)

@@ -17,6 +17,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 | `Sources/main.swift` | IMKInputController、按鍵路由、marked text 與提交生命週期 |
 | `Sources/IME/Models/UnifiedCompositionEngine.swift` | 共用組字狀態與多語言預測 |
 | `Sources/IME/Models/CompositionPresentation.swift` | 共用候選合併與去重、預覽、正文與游標位置 |
+| `Sources/IME/Models/BopomofoOrderCorrection.swift` | 未完成音節的注音順序容錯與詞庫讀音核對 |
 | `Sources/IME/Models/SymbolCandidates.swift` | 標點快捷鍵與同類符號候選 |
 | `Sources/IME/Models/LanguageTypes.swift` | 來源按鍵範圍、確認狀態與候選身分 |
 | `Sources/IME/Models/MixedMergeSupport.swift` | 中英來源範圍對齊與局部合併 |
@@ -43,6 +44,12 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 - 音節插入或刪除時同步搬移後方鎖定；與編輯範圍交錯的詞彙重新解碼。
 - Delete／Backspace 依標準鍵碼判斷刪除方向，Home／End 使用共用組字邊界移動流程。
 
+## 音節順序容錯
+
+`BopomofoOrderCorrection` 以詞庫中的有效單字讀音為依據。追加按鍵時，若目前順序沒有有效讀音，且每類注音符號至多一個，才嘗試依聲母、介音、韻母與聲調重排；重排結果必須符合詞庫讀音。例如「ㄐㄠㄧ」可還原為「ㄐㄧㄠ」。已完成的音節與原本合法的音節邊界不跨越，不增刪注音或猜測聲調。
+
+`pendingRawInput` 保留實際按鍵順序。修正後按 Backspace，先移除最後一個原始按鍵，再重建未完成讀音，避免刪除排序後的錯誤位置。
+
 ## 來源按鍵與確認狀態
 
 `UnifiedCompositionState` 使用 `readingRawInputs` 保存已完成音節的來源按鍵，`pendingRawInput` 保存未完成音節。`CompositionInputSpan` 的 `start`／`end` 是原始按鍵的字元座標，採左閉右開範圍；`CompositionSegmentKey` 使用音節座標，Cocoa 顯示位置使用 UTF-16，三者不能混用。
@@ -53,7 +60,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 
 ## 候選合併
 
-`CandidateListPolicy.merge` 同時供雙側候選與正式介面的跨語言候選使用。流程先固定目前正文，對各來源去重後，依來源內的名次交錯合併。同名次、同起點時優先較完整的替換範圍，平手時保留來源順序，最後套用可見數量上限。
+`CandidateListPolicy.merge` 同時供雙側候選與正式介面的跨語言候選使用。流程先固定目前正文，對各來源去重後，依來源內的名次交錯合併。同名次、同起點時優先較完整的替換範圍，平手時保留來源順序，最後套用可見數量上限。原注音候選以文字等於替換讀音且全部由注音符號組成來識別，去重後保留在清單尾端；一般候選使用剩餘名額，避免雙側或跨語言合併截掉原注音選項。
 
 中文與英文引擎保留各自的排序及模型評分，合併層不直接比較或相加不同尺度的原始分數。`SessionCtl` 用 `CandidateIdentity` 追蹤選取焦點，避免僅因來源標記補齊而失去原候選。
 

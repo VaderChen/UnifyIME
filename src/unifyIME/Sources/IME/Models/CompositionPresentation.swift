@@ -20,10 +20,16 @@ enum CandidateListPolicy {
         var seen = Set<CandidateIdentity>()
         var result: [CandidateEntry] = []
         if let current { result.append(current); seen.insert(current.identity) }
+        // 原注音固定保留在尾端，避免在雙側或跨語言合併時被候選上限截掉。
+        var literalSeen = seen
+        let literals = Array(lists.flatMap { $0 }.filter {
+            $0.isBopomofoLiteral && literalSeen.insert($0.identity).inserted
+        }.prefix(max(0, limit - result.count)))
+        let normalLimit = limit - literals.count
         // 先在每個來源去重，重複項目不佔用名次。
         let normalized = lists.map { list in
             var localSeen = Set<CandidateIdentity>()
-            return list.filter { $0.identity != current?.identity && localSeen.insert($0.identity).inserted }
+            return list.filter { !$0.isBopomofoLiteral && $0.identity != current?.identity && localSeen.insert($0.identity).inserted }
         }
         for rank in 0..<(normalized.map(\.count).max() ?? 0) {
             let ranked = normalized.enumerated().compactMap { source, entries -> (Int, CandidateEntry)? in
@@ -44,11 +50,11 @@ enum CandidateListPolicy {
                 return lhs.0 < rhs.0
             }
             for (_, entry) in peers where seen.insert(entry.identity).inserted {
-                if result.count == limit { return result }
+                if result.count == normalLimit { return result + literals }
                 result.append(entry)
             }
         }
-        return Array(result.prefix(limit))
+        return Array(result.prefix(normalLimit)) + literals
     }
 }
 

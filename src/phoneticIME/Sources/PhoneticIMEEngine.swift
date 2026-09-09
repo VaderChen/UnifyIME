@@ -128,7 +128,8 @@ enum PhoneticIMECore {
                 state.pendingRawInput = UnifiedCompositionState.sourceInput(for: state.currentReading)
             }
             for (rawKey, symbol) in zip(token.lowercased().map(String.init), mapped.map(String.init)) {
-                if SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol) {
+                let reordered = BopomofoOrderCorrection.appending(symbol, to: state.currentReading)
+                if reordered == nil && SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol) {
                     finalizeCurrentReading(state: &state)
                 }
                 if state.currentReading.isEmpty,
@@ -143,7 +144,7 @@ enum PhoneticIMECore {
                     }
                     prepareFocusedSegmentReplacementIfNeeded(state: &state)
                 }
-                state.currentReading.append(symbol)
+                state.currentReading = reordered ?? (state.currentReading + symbol)
                 state.pendingRawInput.append(rawKey)
                 state.selectedCandidateIndex = 0
                 state.rawReadingSymbols = state.readings.joined().map { String($0) }
@@ -181,11 +182,17 @@ enum PhoneticIMECore {
                 preferredReadingIndex: localFocusReadingIndex
             )
             guard let focus else { return [] }
-            return buildCandidateEntries(
+            var entries = buildCandidateEntries(
                 focus: focus,
                 candidates: candidates,
                 preferredReadingIndex: localFocusReadingIndex
             )
+            let literal = CandidateEntry(text: focus.reading, languageID: focus.languageID,
+                replacementKey: CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading))
+            if literal.isBopomofoLiteral, !entries.contains(where: { $0.identity == literal.identity }) {
+                entries.append(literal)
+            }
+            return entries
         } previewOverrideProvider: { focus, chosen in
             guard chosen.text.count == 1, focus.length > 1, focus.value.count > 1 else { return nil }
             let syllables = UnifiedCompositionEngine.splitReadingIntoSyllables(focus.reading)
@@ -294,8 +301,10 @@ enum PhoneticIMECore {
     static func pressBackspace(state: inout UnifiedCompositionState) {
         if !state.currentReading.isEmpty {
             if state.pendingRawInput.isEmpty { state.pendingRawInput = UnifiedCompositionState.sourceInput(for: state.currentReading) }
-            state.currentReading.removeLast()
             state.pendingRawInput.removeLast()
+            // 重排後仍依實際按鍵順序退格，不能刪除排序後的最後一個注音。
+            let original = SessionCtl.mapKeySequence(state.pendingRawInput) ?? ""
+            state.currentReading = BopomofoOrderCorrection.normalize(original) ?? original
             if state.currentReading.isEmpty, !state.trailingReadings.isEmpty {
                 let restoreCursor = state.readings.count
                 state.readings.append(contentsOf: state.trailingReadings)
