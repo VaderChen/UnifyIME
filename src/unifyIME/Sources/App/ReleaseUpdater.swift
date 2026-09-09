@@ -72,7 +72,60 @@ enum ReleaseUpdater {
               url.path.hasPrefix("/VaderChen/UnifyIME/releases/download/") else { throw failure("更新檔來源不正確。") }
         return request(url)
     }
-    static func prepare(_ update: Update) async throws -> URL {
+    private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+        let expected: Int64
+        let progress: @Sendable (Double?, String) -> Void
+        private let lock = NSLock()
+        private var lastPercent = -1
+        private var continuation: CheckedContinuation<(URL, URLResponse), Error>?
+        private var downloaded: Result<(URL, URLResponse), Error>?
+        func download(_ request: URLRequest) async throws -> (URL, URLResponse) {
+            let session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+            return try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                session.downloadTask(with: request).resume()
+            }
+        }
+        init(expected: Int64, progress: @escaping @Sendable (Double?, String) -> Void) {
+            self.expected = expected
+            self.progress = progress
+        }
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didWriteData bytesWritten: Int64, totalBytesWritten: Int64,
+                        totalBytesExpectedToWrite: Int64) {
+            let fraction = min(1, max(0, Double(totalBytesWritten) / Double(max(1, expected))))
+            let percent = Int(fraction * 100)
+            lock.lock()
+            let changed = percent != lastPercent
+            lastPercent = percent
+            lock.unlock()
+            guard changed else { return }
+            let received = ByteCountFormatter.string(fromByteCount: totalBytesWritten, countStyle: .file)
+            let total = ByteCountFormatter.string(fromByteCount: expected, countStyle: .file)
+            progress(fraction, "下載中 \(percent)%（\(received)／\(total)）")
+        }
+        func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask,
+                        didFinishDownloadingTo location: URL) {
+            do {
+                guard let response = downloadTask.response else { throw ReleaseUpdater.failure("下載未收到有效回應。") }
+                // 委派返回後系統會刪除暫存檔，必須先搬到自己管理的路徑。
+                let saved = FileManager.default.temporaryDirectory.appendingPathComponent("unifyime-download-\(UUID().uuidString)")
+                try FileManager.default.moveItem(at: location, to: saved)
+                downloaded = .success((saved, response))
+            } catch { downloaded = .failure(error) }
+        }
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            defer { continuation = nil; session.finishTasksAndInvalidate() }
+            if let error {
+                if case .success(let value) = downloaded { try? FileManager.default.removeItem(at: value.0) }
+                continuation?.resume(throwing: error)
+            } else {
+                continuation?.resume(with: downloaded ?? .failure(ReleaseUpdater.failure("下載未完成，請重新嘗試。")))
+            }
+        }
+    }
+    static func prepare(_ update: Update,
+                        progress: @escaping @Sendable (Double?, String) -> Void = { _, _ in }) async throws -> URL {
         let expected: String
         if let digest = update.asset.digest, digest.hasPrefix("sha256:") {
             expected = String(digest.dropFirst(7)).lowercased()
@@ -84,9 +137,12 @@ enum ReleaseUpdater {
             expected = String(fields[0]).lowercased()
         } else { throw failure("此版本缺少 SHA-256 校驗資訊，無法自動安裝。") }
         guard expected.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { throw failure("SHA-256 格式不正確。") }
-        let (download, response) = try await URLSession.shared.download(for: assetRequest(update.asset))
+        progress(0, "正在連線下載…")
+        let delegate = DownloadDelegate(expected: update.asset.size, progress: progress)
+        let (download, response) = try await delegate.download(assetRequest(update.asset))
         defer { try? FileManager.default.removeItem(at: download) }
         try validate(response)
+        progress(nil, "下載完成，正在驗證並準備安裝…")
         return try await Task.detached {
             try prepareDownloaded(download, update: update, expected: expected)
         }.value
@@ -105,7 +161,7 @@ enum ReleaseUpdater {
         return data
     }
     private static func verifyApp(_ app: URL, identifier: String) throws {
-        _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R", "identifier \"\(identifier)\" and anchor apple generic", app.path])
+        _ = try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", "-R", "=identifier \"\(identifier)\" and anchor apple generic", app.path])
         _ = try run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path])
     }
     private static func prepareDownloaded(_ download: URL, update: Update, expected: String) throws -> URL {

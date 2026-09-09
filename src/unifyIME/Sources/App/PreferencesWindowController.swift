@@ -10,6 +10,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
     private var selectedSection = "general"
     private var updateBusy = false
     private var updateStatus = ""
+    private var updateProgress: Double?
 #if DEBUG
     private var debugRefreshTimer: Timer?
     private static let debugMetricLabels = [
@@ -53,13 +54,20 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         }
     }
 
+    private func updateAlert() -> NSAlert {
+        let alert = NSAlert()
+        if let url = Bundle.main.url(forResource: "Bopomofo", withExtension: "tiff"),
+           let icon = NSImage(contentsOf: url) { alert.icon = icon }
+        return alert
+    }
+
     private func checkForUpdates() {
         guard !readOnly, !updateBusy else { return }
         updateBusy = true
         updateStatus = "正在檢查更新…"
         publishState()
         Task { @MainActor in
-            defer { updateBusy = false; publishState() }
+            defer { updateBusy = false; updateProgress = nil; publishState() }
             var preparedInstaller: URL?
             do {
                 let current = Self.formattedBuildVersionString()
@@ -69,7 +77,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
                 }
                 updateStatus = "找到新版 \(update.version.display)"
                 publishState()
-                let alert = NSAlert()
+                let alert = updateAlert()
                 alert.messageText = "發現新版全一輸入法"
                 alert.informativeText = "目前版本：\(current)\n最新版本：\(update.version.display)\n\n確認後將下載並安裝，完成時會重新啟動輸入法。請先送出尚未完成的文字；個人詞頻與偏好設定會保留。"
                 alert.addButton(withTitle: "下載並安裝")
@@ -80,7 +88,15 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
                 }
                 updateStatus = "正在下載並驗證更新…"
                 publishState()
-                let installer = try await ReleaseUpdater.prepare(update)
+                let installer = try await ReleaseUpdater.prepare(update) { [weak self] fraction, status in
+                    Task { @MainActor in
+                        guard let self, self.updateBusy else { return }
+                        self.updateProgress = fraction
+                        self.updateStatus = status
+                        self.publishState()
+                    }
+                }
+                updateProgress = nil
                 preparedInstaller = installer
                 updateStatus = "正在啟動安裝程式…"
                 publishState()
@@ -92,7 +108,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
             } catch {
                 if let preparedInstaller { try? FileManager.default.removeItem(at: preparedInstaller.deletingLastPathComponent()) }
                 updateStatus = "更新未完成，請重試"
-                let alert = NSAlert()
+                let alert = updateAlert()
                 alert.messageText = "無法完成版本更新"
                 alert.informativeText = error.localizedDescription
                 alert.addButton(withTitle: "好")
@@ -228,7 +244,8 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
                        "pause": currentPauseRecognitionMode.rawValue, "chinese": language(chineseLanguageDefaultsKey, .bopomofo),
                        "english": language(englishLanguageDefaultsKey, .english), "japanese": CompositionLanguageSetting.disabled.rawValue],
             "version": Self.formattedBuildVersionString(),
-            "updateBusy": updateBusy, "updateStatus": updateStatus
+            "updateBusy": updateBusy, "updateStatus": updateStatus,
+            "updateProgress": updateProgress.map { $0 as Any } ?? NSNull()
         ]
 #if DEBUG
         result["profiling"] = isRuntimeProfilingEnabled

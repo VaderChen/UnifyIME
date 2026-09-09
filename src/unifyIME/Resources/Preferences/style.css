@@ -6,3 +6,5 @@
 select:disabled{opacity:.45;cursor:default}
 
 .update-button:disabled{opacity:.55;cursor:default}.update-status{display:block;color:var(--muted);font-size:11px;padding-right:115px}.update-status:empty{display:none}
+
+.update-progress{display:block;width:calc(100% - 115px);height:8px;margin-top:8px;accent-color:var(--accent)}
