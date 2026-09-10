@@ -34,6 +34,12 @@
 
 也可手動執行新版 DMG 內的同一個安裝程式。安裝程式會先備份舊版，完成後重新載入輸入法；安裝失敗時嘗試還原。個人詞頻與偏好設定會保留。
 
+若在某個 App（例如 Safari）切換到全一輸入法後立刻跳回 ABC，通常是該 App 保存的輸入法清單快取仍停留在安裝前。安裝程式完成時會清除這類過期快取，並列出需要重新開啟的 App；重新開啟後即可切換。舊版安裝程式沒有這一步，可先結束該 App，在「終端機」執行下列指令後重新開啟（以 Safari 為例，其他 App 請將 `com.apple.Safari` 換成該 App 的 bundle ID）：
+
+```sh
+rm -f "$(getconf DARWIN_USER_CACHE_DIR)com.apple.Safari/com.apple.IntlDataCache.le"*
+```
+
 ## 基本操作
 
 以下按鍵作用於尚未送出的組字內容。

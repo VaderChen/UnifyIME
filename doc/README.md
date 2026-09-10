@@ -100,6 +100,8 @@ CLI 模擬器的左右鍵會先提交組字，與原生 SessionCtl 在組字內�
 
 ## 發布與安裝程式
 
-發布者本機的 `pack.command` 不隨 GitHub 原始碼提供；此工具預設從最新原始碼建置 release，依序簽署、公證輸入法、安裝程式及 DMG，最後產生 SHA-256 校驗檔。安裝程式位於 `scripts/installer/Installer.swift`，只更新目前使用者的輸入法，並處理舊版備份、失敗還原與服務重新載入。
+發布者本機的 `pack.command` 不隨 GitHub 原始碼提供；此工具預設從最新原始碼建置 release，依序簽署、公證輸入法、安裝程式及 DMG，最後產生 SHA-256 校驗檔。安裝程式位於 `scripts/installer/Installer.swift`，只更新目前使用者的輸入法，並處理舊版備份、失敗還原、過期輸入來源快取清除與服務重新載入。
+
+沙盒 App 會在 `DARWIN_USER_CACHE_DIR/<bundle id>/` 各自保存輸入來源快取（`com.apple.IntlDataCache.le*`）。快取若建立於輸入法安裝或搬移之前，該 App 會判定輸入法無法解析，切換後立即跳回 ABC。安裝程式與本機部署腳本（`reload-IME.command`、`build.sh --deploy`、`build-dev.command`、`build-release-notarize.command`）在註冊輸入法後，會清除未記錄目前安裝路徑的快取，並列出需要重新開啟的前景 App。shell 端邏輯位於 `scripts/ime_cache_common.sh`，`clear_stale_input_source_caches` 支援 `--dry-run`；安裝程式可用 `--list-stale-input-source-caches` 只列出、不刪除。原因與排查方式請參考 [踩坑紀錄](踩坑紀錄.md) 第 37 條。
 
 封裝時由 `Resources/Bopomofo.tiff` 產生 ICNS，供安裝程式與 DMG 磁碟使用。所有圖示與資源變更均在簽章前完成。完整參數與操作請參考 [部署說明](DEPLOY.md)。
