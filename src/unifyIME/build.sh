@@ -159,6 +159,7 @@ cp "$ROOT/Resources/zh-Hant.lproj/InfoPlist.strings" "$RES_DIR/zh-Hant.lproj/Inf
 if [[ -d "$ROOT/Resources/Preferences" ]]; then
   mkdir -p "$RES_DIR/Preferences"
   ditto "$ROOT/Resources/Preferences" "$RES_DIR/Preferences"
+  /usr/bin/find "$RES_DIR/Preferences" -type f -name "*.bak*" -delete
 fi
 
 if [[ -d "$WORKSPACE_ROOT/src/englishIME/Resources" ]]; then
