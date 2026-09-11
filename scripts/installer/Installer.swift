@@ -94,6 +94,14 @@ enum Installation {
 final class InstallerDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow!
     private var installing = true
+    // 舊版更新器未傳遞參數；已安裝的使用者也採用更新完成流程。
+    private let automaticUpdate: Bool = {
+        if CommandLine.arguments.contains("--update") { return true }
+        let installed = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Input Methods/全一輸入法.app/Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: installed) else { return false }
+        return info["CFBundleIdentifier"] as? String == "com.vader.inputmethod.UnifyIME"
+    }()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 170),
@@ -118,6 +126,10 @@ final class InstallerDelegate: NSObject, NSApplicationDelegate {
 
     private func finish(_ result: Result<Void, Error>) {
         installing = false
+        if automaticUpdate, case .success = result {
+            NSApp.terminate(nil)
+            return
+        }
         let alert = NSAlert()
         switch result {
         case .success:

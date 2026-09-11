@@ -101,6 +101,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
                 updateStatus = "正在啟動安裝程式…"
                 publishState()
                 let configuration = NSWorkspace.OpenConfiguration()
+                configuration.arguments = ["--update"]
                 configuration.activates = true
                 configuration.createsNewApplicationInstance = true
                 _ = try await NSWorkspace.shared.openApplication(at: installer, configuration: configuration)
