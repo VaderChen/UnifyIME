@@ -148,6 +148,7 @@ BUILD_DISPLAY="$BUILD_VERSION build ${BUILD_CLOCK[9,12]}"
 /usr/libexec/PlistBuddy -c "Add :UnifyIMEBuildVersion string $BUILD_DISPLAY" "$APP_DIR/Contents/Info.plist"
 
 cp "$ROOT/Resources/Bopomofo.tiff" "$RES_DIR/Bopomofo.tiff"
+cp "$ROOT/Resources/English.tiff" "$RES_DIR/English.tiff"
 cp "$ROOT/Resources/common_map.tsv" "$RES_DIR/common_map.tsv"
 cp "$ROOT/Resources/phrase_map.tsv" "$RES_DIR/phrase_map.tsv"
 cp "$WORKSPACE_ROOT/lexicons/README.md" "$RES_DIR/Lexicon-Licenses.md"

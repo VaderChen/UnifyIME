@@ -91,3 +91,7 @@ __pycache__/
 /src/unifyIME/scripts/article_rounds.py
 /src/unifyIME/tests/article_keys.json
 /測試文章_*.txt
+
+# 本機 AI 評估工具與說明
+/doc/EVALUATION.md
+/scripts/evaluate_input_effort.py

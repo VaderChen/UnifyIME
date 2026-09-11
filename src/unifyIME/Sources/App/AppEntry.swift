@@ -70,7 +70,13 @@ private final class BasicSelectionWindowAppDelegate: NSObject, NSApplicationDele
         BasicCandidatePanelController.shared.show(anchor: helperPinnedAnchor, candidates: candidates, selectedIndex: selectedIndex)
     }
 
+    @objc private func handleCaretMode(_ notification: Notification) {
+        InputLanguageCaretIndicator.shared.receive(notification)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(handleCaretMode(_:)),
+            name: InputLanguageCaretIndicator.notification, object: nil)
         BasicCandidatePanelController.shared.prewarm()
         DistributedNotificationCenter.default().addObserver(
             self,

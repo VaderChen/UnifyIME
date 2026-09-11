@@ -30,7 +30,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         configuration.websiteDataStore = .nonPersistent()
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         webView = WKWebView(frame: .zero, configuration: configuration)
-        let window = NSWindow(
+        let window = PreferencesWindow(
             contentRect: NSRect(x: 0, y: 0, width: 740, height: 540),
             styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false
         )
@@ -196,6 +196,9 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         case "alignment":
             guard let raw = value as? String, let mode = CandidateCursorAlignment(rawValue: raw) else { return false }
             currentCandidateCursorAlignment = mode
+        case "shiftLanguageToggle":
+            guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return false }
+            shiftLanguageToggleEnabled = number.boolValue
         case "pause":
             guard let raw = value as? String, let mode = PauseRecognitionMode(rawValue: raw) else { return false }
             currentPauseRecognitionMode = mode
@@ -240,6 +243,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         ]
         var result: [String: Any] = [
             "sections": sections, "section": selectedSection, "readOnly": readOnly, "options": options, "disabledKeys": ["japanese"],
+            "shiftLanguageToggle": shiftLanguageToggleEnabled,
             "values": ["engine": currentCandidateEngineMode.rawValue, "alignment": currentCandidateCursorAlignment.rawValue,
                        "pause": currentPauseRecognitionMode.rawValue, "chinese": language(chineseLanguageDefaultsKey, .bopomofo),
                        "english": language(englishLanguageDefaultsKey, .english), "japanese": CompositionLanguageSetting.disabled.rawValue],

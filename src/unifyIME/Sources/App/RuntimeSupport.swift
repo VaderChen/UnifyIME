@@ -528,3 +528,17 @@ func publishDetailedProbeIfNeeded(route: String, input: String, composing: @auto
     guard currentCandidateWindowMode == .detailed else { return }
     publishIMEProbe(route: route, input: input, composing: composing(), candidateEntries: candidateEntries(), selectedIndex: selectedIndex, focusInfo: focusInfo, anchor: anchor)
 }
+
+// 中英文模式只作用於本輸入法；偏好只保存是否允許 Shift 切換。
+var shiftEnglishInputActive = false
+var shiftLanguageToggleEnabled: Bool {
+    get { (imeDefaults.object(forKey: "UnifyIME.ShiftLanguageToggle") as? Bool) ?? true }
+    set {
+        imeDefaults.set(newValue, forKey: "UnifyIME.ShiftLanguageToggle")
+        imeDefaults.synchronize()
+        if !newValue {
+            shiftEnglishInputActive = false
+            InputLanguageCaretIndicator.shared.hide()
+        }
+    }
+}

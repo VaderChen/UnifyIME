@@ -5,6 +5,9 @@ import UserNotifications
 
 @objc(SessionCtl)
 final class SessionCtl: IMKInputController, CandidateSelectionHandler {
+    private var shiftLanguageGesture = ShiftLanguageGesture()
+    // InputMethodKit 可能把同一事件交給多個 session，僅切換一次。
+    private static var lastShiftToggleTimestamp: TimeInterval?
     private struct InputEventSnapshot {
         let keyCode: UInt16
         let chars: String
@@ -834,10 +837,12 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     override func recognizedEvents(_ sender: Any!) -> Int {
-        Int(NSEvent.EventTypeMask.keyDown.rawValue)
+        Int(NSEvent.EventTypeMask.keyDown.rawValue | NSEvent.EventTypeMask.flagsChanged.rawValue)
     }
 
     override func activateServer(_ client: Any!) {
+        shiftLanguageGesture.reset()
+
         traceState("activateServer.before")
         appendRuntimeTrace("activateServer client=\(String(describing: client))")
         resetSelectionSentenceTracking()
@@ -866,6 +871,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     override func deactivateServer(_ client: Any!) {
+        InputLanguageCaretIndicator.shared.hide()
+        shiftLanguageGesture.reset()
         appendRuntimeTrace("deactivateServer client=\(String(describing: client))")
         lastCommitReason = "deactivateServer"
         commitCurrentComposition(client, reason: "deactivateServer")
@@ -962,6 +969,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     override func handle(_ event: NSEvent!, client: Any!) -> Bool {
+        guard let event else { return false }
         let startedAt = isRuntimeProfilingEnabled ? DispatchTime.now().uptimeNanoseconds : 0
         var processedCharacterCount = 0
         defer {
@@ -970,13 +978,43 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
                 recordRuntimePerCharacterProcessing(elapsedNs: elapsedNs, characterCount: processedCharacterCount)
             }
         }
+        if !shiftLanguageToggleEnabled {
+            shiftLanguageGesture.reset()
+        }
+        if event.type == .flagsChanged {
+            let flags = event.modifierFlags.intersection([.shift, .control, .option, .command, .capsLock, .function])
+            if shiftLanguageToggleEnabled,
+               shiftLanguageGesture.flagsChanged(keyCode: event.keyCode,
+                   shift: flags.contains(.shift), otherModifiers: !flags.subtracting(.shift).isEmpty) {
+                if hasComposition {
+                    flushPendingRawReplay()
+                    flushPendingMerge()
+                    finalizePendingReadingForCommit()
+                    commitCurrentComposition(client, reason: "shiftLanguageToggle")
+                }
+                if Self.lastShiftToggleTimestamp != event.timestamp {
+                    Self.lastShiftToggleTimestamp = event.timestamp
+                    shiftEnglishInputActive.toggle()
+                }
+                // 重複通知仍可帶有較完整的客戶端游標資訊；模式只切一次。
+                InputLanguageCaretIndicator.shared.show(client: client, english: shiftEnglishInputActive)
+
+            }
+            return false
+        }
+        guard event.type == .keyDown else { return false }
+        InputLanguageCaretIndicator.shared.hide()
+        // characters 與 charactersIgnoringModifiers 僅能用於文字按鍵事件。
+        // flagsChanged 必須先處理完，連診斷紀錄也不能提前讀取這些欄位。
         appendRuntimeTrace("handle entry type=\(event.type.rawValue) keyCode=\(event.keyCode) chars=\(event.characters ?? "∅") raw=\(event.charactersIgnoringModifiers ?? "∅")")
         let deletionKey = CompositionDeletionKey.resolve(keyCode: event.keyCode)
         if deletionKey != nil {
             appendFocusedTrace("delete.handle keyCode=\(event.keyCode) chars=\(event.characters ?? "∅") raw=\(event.charactersIgnoringModifiers ?? "∅") hasComposition=\(hasComposition)")
         }
         traceState("handle.pre keyCode=\(event.keyCode)")
-        guard event.type == .keyDown else { return false }
+        shiftLanguageGesture.keyDown()
+        // 英文直輸交由目前應用程式處理，保留大小寫與所有快捷鍵。
+        if shiftEnglishInputActive { return false }
 
         let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command, .capsLock, .numericPad, .function])
         // 不將修飾鍵刪除組合攔截為單字刪除。function 亦可能是獨立
