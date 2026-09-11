@@ -531,14 +531,39 @@ func publishDetailedProbeIfNeeded(route: String, input: String, composing: @auto
 
 // 中英文模式只作用於本輸入法；偏好只保存是否允許 Shift 切換。
 var shiftEnglishInputActive = false
-var shiftLanguageToggleEnabled: Bool {
-    get { (imeDefaults.object(forKey: "UnifyIME.ShiftLanguageToggle") as? Bool) ?? true }
+enum ShiftLanguageToggleMode: String, CaseIterable {
+    case disabled, left, right, all
+    var title: String {
+        switch self {
+        case .disabled: return "關閉"
+        case .left: return "左 SHIFT"
+        case .right: return "右 SHIFT"
+        case .all: return "全 SHIFT"
+        }
+    }
+    func accepts(_ keyCode: UInt16) -> Bool {
+        switch self {
+        case .disabled: return false
+        case .left: return keyCode == 56
+        case .right: return keyCode == 60
+        case .all: return keyCode == 56 || keyCode == 60
+        }
+    }
+}
+var shiftLanguageToggleMode: ShiftLanguageToggleMode {
+    get {
+        if let raw = imeDefaults.string(forKey: "UnifyIME.ShiftLanguageToggleMode"),
+           let mode = ShiftLanguageToggleMode(rawValue: raw) { return mode }
+        // 舊版布林設定與首次使用保持相容。
+        return (imeDefaults.object(forKey: "UnifyIME.ShiftLanguageToggle") as? Bool) == true ? .all : .disabled
+    }
     set {
-        imeDefaults.set(newValue, forKey: "UnifyIME.ShiftLanguageToggle")
+        imeDefaults.set(newValue.rawValue, forKey: "UnifyIME.ShiftLanguageToggleMode")
         imeDefaults.synchronize()
-        if !newValue {
+        if newValue == .disabled {
             shiftEnglishInputActive = false
             InputLanguageCaretIndicator.shared.hide()
         }
     }
 }
+var shiftLanguageToggleEnabled: Bool { shiftLanguageToggleMode != .disabled }

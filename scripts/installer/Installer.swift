@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 
 // 安裝僅作用於目前使用者，不需要管理員權限。
 enum Installation {
@@ -51,6 +52,32 @@ enum Installation {
         throw lastError!
     }
 
+    // 安裝工作在背景執行；TIS 切換交回主執行緒。
+    private static func refreshInputSessionBeforeUpdate() -> (() -> Void)? {
+        DispatchQueue.main.sync {
+            guard let original = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+                  let bundle = TISGetInputSourceProperty(original, kTISPropertyBundleID),
+                  Unmanaged<CFString>.fromOpaque(bundle).takeUnretainedValue() as String == "com.vader.inputmethod.UnifyIME",
+                  let originalID = TISGetInputSourceProperty(original, kTISPropertyInputSourceID),
+                  let temporary = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+                  let temporaryID = TISGetInputSourceProperty(temporary, kTISPropertyInputSourceID) else { return nil }
+            let sourceID = Unmanaged<CFString>.fromOpaque(originalID).takeUnretainedValue() as String
+            let temporarySourceID = Unmanaged<CFString>.fromOpaque(temporaryID).takeUnretainedValue() as String
+            guard TISSelectInputSource(temporary) == noErr else { return nil }
+            return {
+                DispatchQueue.main.sync {
+                    // 使用者若在更新期間選了其他來源，不覆蓋其選擇。
+                    guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
+                          let currentID = TISGetInputSourceProperty(current, kTISPropertyInputSourceID),
+                          Unmanaged<CFString>.fromOpaque(currentID).takeUnretainedValue() as String == temporarySourceID else { return }
+                    let filter = [kTISPropertyInputSourceID as String: sourceID] as CFDictionary
+                    let sources = TISCreateInputSourceList(filter, false)?.takeRetainedValue() as? [TISInputSource] ?? []
+                    if let refreshed = sources.first { _ = TISSelectInputSource(refreshed) }
+                }
+            }
+        }
+    }
+
     static func install() throws {
         let fm = FileManager.default
         let source = try payload()
@@ -65,6 +92,8 @@ enum Installation {
         defer { if !keepBackup { try? fm.removeItem(at: stage) } }
         try run("/usr/bin/ditto", [source.path, incoming.path])
         try run("/usr/bin/codesign", ["--verify", "--deep", "--strict", incoming.path])
+        let restoreInputSession = refreshInputSessionBeforeUpdate()
+        defer { restoreInputSession?() }
         let existed = fm.fileExists(atPath: destination.path)
         if existed { try fm.moveItem(at: destination, to: backup) }
         do {

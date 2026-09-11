@@ -985,7 +985,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             let flags = event.modifierFlags.intersection([.shift, .control, .option, .command, .capsLock, .function])
             if shiftLanguageToggleEnabled,
                shiftLanguageGesture.flagsChanged(keyCode: event.keyCode,
-                   shift: flags.contains(.shift), otherModifiers: !flags.subtracting(.shift).isEmpty) {
+                   shift: flags.contains(.shift), otherModifiers: !flags.subtracting(.shift).isEmpty),
+               shiftLanguageToggleMode.accepts(event.keyCode) {
                 if hasComposition {
                     flushPendingRawReplay()
                     flushPendingMerge()

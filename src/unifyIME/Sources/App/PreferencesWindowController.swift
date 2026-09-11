@@ -197,9 +197,9 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         case "alignment":
             guard let raw = value as? String, let mode = CandidateCursorAlignment(rawValue: raw) else { return false }
             currentCandidateCursorAlignment = mode
-        case "shiftLanguageToggle":
-            guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return false }
-            shiftLanguageToggleEnabled = number.boolValue
+        case "shiftLanguageToggleMode":
+            guard let raw = value as? String, let mode = ShiftLanguageToggleMode(rawValue: raw) else { return false }
+            shiftLanguageToggleMode = mode
         case "pause":
             guard let raw = value as? String, let mode = PauseRecognitionMode(rawValue: raw) else { return false }
             currentPauseRecognitionMode = mode
@@ -236,6 +236,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
             } + CandidateEngineMode.allCases.filter { !$0.isSupported }.map {
                 ["value": $0.rawValue, "title": $0.title, "group": "未支援", "disabled": true]
             },
+            "shiftLanguageToggleMode": ShiftLanguageToggleMode.allCases.map { ["value": $0.rawValue, "title": $0.title] },
             "alignment": CandidateCursorAlignment.allCases.map { ["value": $0.rawValue, "title": $0.title] },
             "pause": PauseRecognitionMode.allCases.map { ["value": $0.rawValue, "title": "\($0.title) · \(Int(($0.interval * 1000).rounded())) ms"] },
             "chinese": [["value": "disabled", "title": "不使用"], ["value": "bopomofo", "title": "注音輸入"]],
@@ -244,7 +245,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         ]
         var result: [String: Any] = [
             "sections": sections, "section": selectedSection, "readOnly": readOnly, "options": options, "disabledKeys": ["japanese"],
-            "shiftLanguageToggle": shiftLanguageToggleEnabled,
+            "shiftLanguageToggleMode": shiftLanguageToggleMode.rawValue,
             "values": ["engine": currentCandidateEngineMode.rawValue, "alignment": currentCandidateCursorAlignment.rawValue,
                        "pause": currentPauseRecognitionMode.rawValue, "chinese": language(chineseLanguageDefaultsKey, .bopomofo),
                        "english": language(englishLanguageDefaultsKey, .english), "japanese": CompositionLanguageSetting.disabled.rawValue],
