@@ -10,6 +10,6 @@ struct HeuristicCandidateRanker: UnifiedCandidateRanker {
         let contextBonus = context.precedingValues.isEmpty ? 0.0 : min(Double(unit.surface.count - 1) * 25.0, 75.0)
         let languageBias = unit.languageID == "zh-Hant" ? 20.0 : 0.0
         let hanBias = script[15] > 0.5 ? 10.0 : 0.0
-        return spanBonus + phraseBonus + contextBonus + languageBias + hanBias - rankPenalty - exactReadingPenalty
+        return PersonalVocabularyStore.bonus(language: unit.languageID, reading: unit.readingOrToken, surface: unit.surface) + spanBonus + phraseBonus + contextBonus + languageBias + hanBias - rankPenalty - exactReadingPenalty
     }
 }

@@ -438,6 +438,11 @@ private func printJSONObjectLine(_ object: [String: Any]) -> Int32 {
 }
 
 func runUnifyIMEAppEntry() {
+    if CommandLine.arguments.dropFirst().first == "mcp" {
+        PersonalVocabularyMCP.run()
+        return
+    }
+    PersonalVocabularyStore.loadSnapshot()
     if CommandLine.arguments.dropFirst().first == "preferences-preview" {
         let app = NSApplication.shared
         let delegate = PreferencesPreviewAppDelegate()
@@ -1163,6 +1168,7 @@ func runUnifyIMEAppEntry() {
     NSApp.setActivationPolicy(.accessory)
     DispatchQueue.main.async {
         BasicCandidatePanelController.shared.prewarm()
+        IMERestart.publishReady()
     }
     NSApp.run()
 }

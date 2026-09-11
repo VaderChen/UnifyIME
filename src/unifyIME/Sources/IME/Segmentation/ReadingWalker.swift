@@ -105,7 +105,7 @@ struct ReadingWalker {
                         } else {
                             // 每個讀音對應一個中文字；禁止以單字候選佔用多音節跨度，
                             // 避免「只要」被錯切成「之」等 DP 路徑。
-                            let phraseSet = Set(lexicon.phraseCandidateMap[combined] ?? [])
+                            let phraseSet = Set((lexicon.phraseCandidateMap[combined] ?? []) + PersonalVocabularyStore.entries(reading: combined).map(\.surface))
                             // 多音節邊必須是詞庫中的完整詞；單純把各音節候選拼成
                             // 妖人、青幫等字串不能取得長度獎勵而吞掉正確拆分。
                             let matched = candidates.filter { $0.count == spanLength && phraseSet.contains($0) }
@@ -154,7 +154,7 @@ struct ReadingWalker {
                             ranker.score(unit: $0, context: context)
                         }
                         let exactPhraseCandidates = exactPhraseCandidatesByReading[combined] ?? {
-                            let phrases = Set(lexicon.phraseCandidateMap[combined] ?? [])
+                            let phrases = Set((lexicon.phraseCandidateMap[combined] ?? []) + PersonalVocabularyStore.entries(reading: combined).map(\.surface))
                             exactPhraseCandidatesByReading[combined] = phrases
                             return phrases
                         }()

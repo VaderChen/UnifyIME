@@ -122,7 +122,7 @@ enum UserFrequencyStore {
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5.0, execute: item)
     }
 
-    private static func flush() {
+    static func flush() {
         lock.lock()
         let toFlush = dirty
         let snapshot = cache

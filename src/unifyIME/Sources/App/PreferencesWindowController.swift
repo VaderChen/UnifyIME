@@ -168,6 +168,18 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
             updateDebugTimer()
 #endif
             replyHandler(snapshot(), nil)
+        case "copyMCP":
+            let text: String
+            switch body["kind"] as? String {
+            case "configuration": text = MCPGuide.configuration
+            case "prompt": text = MCPGuide.prompt
+            default: replyHandler(nil, "不支援的複製內容。"); return
+            }
+            NSPasteboard.general.clearContents()
+            guard NSPasteboard.general.setString(text, forType: .string) else {
+                replyHandler(nil, "無法寫入剪貼簿。"); return
+            }
+            replyHandler(["copied": true], nil)
         case "checkForUpdates":
             guard !readOnly else { replyHandler(nil, "唯讀預覽不會執行更新。"); return }
             checkForUpdates()
@@ -185,7 +197,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
     }
 
     private var sections: [String] {
-        let result = ["general", "language", "debug", "about"]
+        let result = ["general", "language", "mcp", "debug", "about"]
         return result
     }
 
@@ -245,6 +257,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
         ]
         var result: [String: Any] = [
             "sections": sections, "section": selectedSection, "readOnly": readOnly, "options": options, "disabledKeys": ["japanese"],
+            "mcpConfiguration": MCPGuide.configuration, "mcpPrompt": MCPGuide.prompt,
             "shiftLanguageToggleMode": shiftLanguageToggleMode.rawValue,
             "values": ["engine": currentCandidateEngineMode.rawValue, "alignment": currentCandidateCursorAlignment.rawValue,
                        "pause": currentPauseRecognitionMode.rawValue, "chinese": language(chineseLanguageDefaultsKey, .bopomofo),

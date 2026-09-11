@@ -98,7 +98,7 @@ struct LexiconStore {
         if let cached = Self.candidateCache[buffer] {
             Self.touchCachedReading(buffer)
             Self.candidateCacheLock.unlock()
-            return cached
+            return PersonalVocabularyStore.candidates(reading: buffer, base: cached)
         }
         Self.candidateCacheLock.unlock()
 
@@ -133,7 +133,7 @@ struct LexiconStore {
         Self.candidateCacheLock.lock()
         Self.storeCachedCandidates(resolved, for: buffer)
         Self.candidateCacheLock.unlock()
-        return resolved
+        return PersonalVocabularyStore.candidates(reading: buffer, base: resolved)
     }
 
     private static func touchCachedReading(_ reading: String) {
