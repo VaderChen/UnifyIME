@@ -179,18 +179,10 @@ enum PhoneticIMECore {
                     return symbols.map { CandidateEntry(text: $0, languageID: focus.languageID, replacementKey: key) }
                 }
             }
-            let candidates = computeActiveCandidates(
-                candidateReadings: state.allReadings,
-                walkedSegments: baseSegments,
-                focus: focus,
-                preferredReadingIndex: localFocusReadingIndex
-            )
             guard let focus else { return [] }
-            var entries = buildCandidateEntries(
-                focus: focus,
-                candidates: candidates,
-                preferredReadingIndex: localFocusReadingIndex
-            )
+            var entries = computeActiveCandidateEntries(
+                candidateReadings: state.allReadings, walkedSegments: baseSegments,
+                focus: focus, preferredReadingIndex: localFocusReadingIndex)
             let literal = CandidateEntry(text: focus.reading, languageID: focus.languageID,
                 replacementKey: CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading))
             if literal.isBopomofoLiteral, !entries.contains(where: { $0.identity == literal.identity }) {
@@ -673,127 +665,31 @@ enum PhoneticIMECore {
         }
     }
 
-    private static func computeActiveCandidates(
-        candidateReadings: [String],
-        walkedSegments: [ComposedSegment],
-        focus: ComposedSegment?,
-        preferredReadingIndex: Int? = nil
-    ) -> [String] {
-        var results: [String] = []
-        if let focus {
-            let engineMode = currentCandidateEngineMode
-            for value in SessionCtl.resolveCandidates(for: focus.reading) where !results.contains(value) {
-                results.append(value)
-            }
-            if focus.length > 1, !candidateReadings.isEmpty {
-                let candidateCursorIndex = preferredReadingIndex ?? {
-                    let cursor = min(candidateReadings.count, max(0, focus.start + focus.length))
-                    if cursor >= candidateReadings.count {
-                        return candidateReadings.count - 1
-                    } else if cursor > 0 {
-                        return cursor - 1
-                    } else {
-                        return 0
-                    }
-                }()
-                let localReadingIndex = min(
-                    max(candidateCursorIndex, focus.start),
-                    min(candidateReadings.count - 1, focus.start + focus.length - 1)
-                )
-                let localReading = candidateReadings[localReadingIndex]
-                for value in SessionCtl.resolveCandidates(for: localReading) where !results.contains(value) {
-                    results.append(value)
-                }
-            }
-            let shouldFrontloadFocusValue = (engineMode == .traditionalOnly || engineMode == .traditionalPreferredAIAssist)
-            if shouldFrontloadFocusValue, focus.value != focus.reading, !results.contains(focus.value) {
-                results.insert(focus.value, at: 0)
-            }
-            // Rank within a moving six-syllable window. The displayed composition
-            // remains global, but context scoring must not let a long sentence
-            // repeatedly re-rank stable prefixes when a new suffix is typed.
-            let total = candidateReadings.count
-            let focusEnd = focus.start + focus.length
-            let halfWindow = max(0, candidateWindowLength - focus.length) / 2
-            let windowStart = max(0, min(focus.start - halfWindow, total - candidateWindowLength))
-            let windowEnd = min(total, max(focusEnd + halfWindow, windowStart + candidateWindowLength))
-            let windowReadings = Array(candidateReadings[windowStart..<windowEnd])
-            if ProcessInfo.processInfo.environment["UNIFYIME_RUNTIME_TRACE_ENABLED"] == "1" {
-                appendRuntimeTrace("candidateWindow focus=\(focus.start):\(focus.length) total=\(total) range=\(windowStart)..<\(windowEnd) readings=\(windowReadings.joined(separator: "/"))")
-            }
-            let precedingValues = walkedSegments.filter { $0.start + $0.length <= focus.start && $0.start >= windowStart }.map(\.value)
-            let safeFollowingStart = min(max(focusEnd, windowStart), windowEnd)
-            let followingReadings = Array(candidateReadings[safeFollowingStart..<windowEnd])
-            results = UnifiedCompositionEngine.rankCandidates(
-                results,
-                allReadings: windowReadings,
-                combinedReading: focus.reading,
-                spanLength: focus.length,
-                precedingValues: Array(precedingValues.suffix(3)),
-                followingReadings: followingReadings,
-                focusedReading: focus.reading
-            )
-            if focus.length == 1 {
-                let singles = results.filter { $0.count == 1 }
-                let longer = results.filter { $0.count > 1 }
-                if !singles.isEmpty { results = singles + longer }
-            }
-            let shouldApplySingleOverride = (engineMode != .aiDecides)
-            if shouldApplySingleOverride, focus.length == 1, let overrides = SessionCtl.overrideCharacterMap[focus.reading], !overrides.isEmpty {
-                let overrideSet = Set(overrides)
-                let preferred = overrides.filter { results.contains($0) }
-                let remainder = results.filter { !overrideSet.contains($0) }
-                results = preferred + remainder
-            }
-            let shouldPinMultiSyllableFocus = (engineMode == .traditionalOnly || engineMode == .traditionalPreferredAIAssist)
-            if shouldPinMultiSyllableFocus, focus.length > 1, let focusIndex = results.firstIndex(of: focus.value), focusIndex > 0 {
-                let preferred = results.remove(at: focusIndex)
-                results.insert(preferred, at: 0)
-            }
-        } else {
-            let windowReadings = Array(candidateReadings.suffix(candidateWindowLength))
-            let full = windowReadings.joined()
-            if !full.isEmpty {
-                let exact = SessionCtl.resolveCandidates(for: full)
-                for value in exact where !results.contains(value) {
-                    results.append(value)
-                }
-                results = UnifiedCompositionEngine.rankCandidates(
-                    results,
-                    allReadings: windowReadings,
-                    combinedReading: full,
-                    spanLength: windowReadings.count,
-                    precedingValues: [],
-                    followingReadings: [],
-                    focusedReading: full
-                )
-            }
-        }
-        let filtered = results.filter { LexiconStore.isDisplayableCandidate($0) }
-        return filtered.isEmpty ? results : filtered
-    }
-
-    private static func buildCandidateEntries(
-        focus: ComposedSegment,
-        candidates: [String],
-        preferredReadingIndex: Int?
+    private static func computeActiveCandidateEntries(
+        candidateReadings: [String], walkedSegments: [ComposedSegment],
+        focus: ComposedSegment, preferredReadingIndex: Int?
     ) -> [CandidateEntry] {
-        let syllables = UnifiedCompositionEngine.splitReadingIntoSyllables(focus.reading)
-        return candidates.map { value in
-            let replacementKey: CompositionSegmentKey
-            if value.count == 1, focus.length > 1, syllables.count == focus.length {
-                let readingIndex = preferredReadingIndex ?? focus.start
-                let localOffset = max(0, min(focus.length - 1, readingIndex - focus.start))
-                replacementKey = CompositionSegmentKey(
-                    start: focus.start + localOffset,
-                    length: 1,
-                    reading: syllables[localOffset]
-                )
-            } else {
-                replacementKey = CompositionSegmentKey(start: focus.start, length: focus.length, reading: focus.reading)
+        let tokens = candidateReadings.map { InputToken(languageID: focus.languageID, rawValue: $0) }
+        func entries(start: Int, length: Int) -> [CandidateEntry] {
+            guard start >= 0, length > 0, start + length <= tokens.count else { return [] }
+            let reading = tokens[start..<(start + length)].map(\.rawValue).joined()
+            let candidates = SessionCtl.resolveCandidates(for: reading).filter {
+                $0.count == length && LexiconStore.isDisplayableCandidate($0)
             }
-            return CandidateEntry(text: value, languageID: focus.languageID, replacementKey: replacementKey)
+            let key = CompositionSegmentKey(start: start, length: length, reading: reading)
+            let prefix = CandidateScoringInput.precedingValues(segments: walkedSegments, before: start)
+            return SessionCtl.rankCandidateSpan(candidates, tokens: tokens, start: start,
+                length: length, precedingValues: prefix, limit: visibleCandidateLimit).map {
+                CandidateEntry(text: $0, languageID: focus.languageID, replacementKey: key)
+            }
         }
+        var lists = [entries(start: focus.start, length: focus.length)]
+        if focus.length > 1 {
+            let localIndex = min(max(preferredReadingIndex ?? focus.start, focus.start),
+                focus.start + focus.length - 1)
+            lists.append(entries(start: localIndex, length: 1))
+        }
+        return CandidateListPolicy.merge(lists, current: nil, limit: visibleCandidateLimit)
     }
 
     private static func currentCandidateReadingIndex(for focus: ComposedSegment, state: UnifiedCompositionState) -> Int {

@@ -94,6 +94,14 @@ struct CandidateSelectionContext {
     let precedingValues: [String]
     let followingTokens: [InputToken]
     let focusedToken: String
+    var legacyModelCoordinates: LegacyModelCoordinates? = nil
+}
+
+/// 舊模型需要整句位置與最多六個後文音節；只保存所需資料，不複製整句。
+struct LegacyModelCoordinates {
+    let tokenCount: Int
+    let spanStart: Int
+    let followingTokens: [InputToken]
 }
 
 struct RankedCandidate: Equatable {

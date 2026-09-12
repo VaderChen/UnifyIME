@@ -138,6 +138,20 @@ struct LexiconStore {
         return PersonalVocabularyStore.candidates(reading: buffer, base: resolved)
     }
 
+    /// 多音節分詞只接受精確來源詞條，但不限定來源必須是 phrase_map。
+    func compositionCandidates(reading: String, syllableCount: Int) -> [String] {
+        guard syllableCount > 0 else { return [] }
+        if syllableCount == 1 {
+            return resolveCandidates(for: reading).filter { $0.count == 1 }
+        }
+        var base: [String] = []
+        var seen = Set<String>()
+        appendCandidates(forReading: reading, into: &base, seen: &seen)
+        return PersonalVocabularyStore.candidates(reading: reading, base: base).filter {
+            $0.count == syllableCount && Self.isDisplayableCandidate($0)
+        }
+    }
+
     private static func touchCachedReading(_ reading: String) {
         candidateCacheOrder.removeAll { $0 == reading }
         candidateCacheOrder.append(reading)

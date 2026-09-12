@@ -1,9 +1,21 @@
 import Foundation
 
+enum CandidateFeatureContract: String {
+    case legacySegmentsV1 = "legacy_segments_v1"
+    case boundedSegmentsV2 = "bounded_segments_v2"
+}
+
 struct RankingFeatureEncoder {
     private static let phraseStats = LexiconStore.loadPhraseContextStats()
 
-    func encode(unit: CandidateUnit, context: CandidateSelectionContext) -> RankingFeatureVector {
+    func encode(unit: CandidateUnit, context suppliedContext: CandidateSelectionContext,
+                contract: CandidateFeatureContract = .boundedSegmentsV2) -> RankingFeatureVector {
+        let coordinates = contract == .legacySegmentsV1 ? suppliedContext.legacyModelCoordinates : nil
+        let context = CandidateSelectionContext(languageID: suppliedContext.languageID,
+            allTokens: suppliedContext.allTokens, combinedToken: suppliedContext.combinedToken,
+            spanLength: suppliedContext.spanLength, precedingValues: suppliedContext.precedingValues,
+            followingTokens: coordinates?.followingTokens ?? suppliedContext.followingTokens,
+            focusedToken: suppliedContext.focusedToken)
         let candidateLength = Double(unit.surface.count)
         let tokenLength = Double(unit.readingOrToken.count)
         let precedingCount = Double(context.precedingValues.count)
@@ -31,9 +43,9 @@ struct RankingFeatureEncoder {
             isPhrase,
             hasToneMarks,
             normalizedMatch,
-            Double(unit.spanStart),
+            Double(coordinates?.spanStart ?? unit.spanStart),
             Double(context.focusedToken.count),
-            Double(context.allTokens.count)
+            Double(coordinates?.tokenCount ?? context.allTokens.count)
         ]
 
         features.append(contentsOf: oneHot(index: script.rawValue, count: 5))

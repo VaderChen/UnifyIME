@@ -1785,45 +1785,19 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         followingReadings: [String],
         focusedReading: String
     ) -> [String] {
-        profileRuntime("session.rankCandidates", details: "candidates=\(candidates.count) span=\(spanLength)") {
-            let tokens = allReadings.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
-            let context = CandidateSelectionContext(
-                languageID: traditionalChineseProvider.languageID,
-                allTokens: tokens,
-                combinedToken: combinedReading,
-                spanLength: spanLength,
-                precedingValues: precedingValues,
-                followingTokens: followingReadings.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                focusedToken: focusedReading
-            )
-            let langID = traditionalChineseProvider.languageID
-            let units = candidates.enumerated().map { offset, value in
-                CandidateUnit(
-                    languageID: langID,
-                    surface: value,
-                    readingOrToken: combinedReading,
-                    spanStart: 0,
-                    spanLength: spanLength,
-                    providerScore: Double(-offset),
-                    baseRank: offset
-                )
-            }
-            let modelScores = candidateRanker.scores(units: units, context: context)
-            let scored = zip(units, modelScores).map { unit, modelScore -> RankedCandidate in
-                RankedCandidate(unit: unit, score: modelScore)
-            }
-            let ranked = scored
-                .sorted {
-                    if $0.score == $1.score {
-                        return $0.unit.baseRank < $1.unit.baseRank
-                    }
-                    return $0.score > $1.score
-                }
-                .map(\.unit.surface)
-            let duplicateCount = candidates.count - Set(candidates).count
-            appendFocusedTrace("rank.result combined=\(combinedReading) candidates=\(candidates.joined(separator: "|")) model=\(modelScores.map { String(format: "%.3f", $0) }.joined(separator: "|")) ranked=\(ranked.joined(separator: "|")) duplicates=\(duplicateCount)")
-            return ranked
-        }
+        let tokens = allReadings.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+        let start = allReadings.count - followingReadings.count - spanLength
+        guard start >= 0, start + spanLength <= tokens.count,
+              tokens[start..<(start + spanLength)].map(\.rawValue).joined() == combinedReading else { return candidates }
+        return rankCandidateSpan(candidates, tokens: tokens, start: start, length: spanLength,
+            precedingValues: precedingValues, limit: candidates.count)
+    }
+
+    static func rankCandidateSpan(_ candidates: [String], tokens: [InputToken], start: Int,
+                                  length: Int, precedingValues: [String], limit: Int) -> [String] {
+        guard let input = CandidateScoringInput.make(candidates: candidates, tokens: tokens,
+            start: start, length: length, precedingValues: precedingValues) else { return [] }
+        return candidateRanker.ranked(units: input.units, context: input.context, limit: limit).map(\.unit.surface)
     }
 
     private var composingBuffer: String {

@@ -4,6 +4,7 @@ import Foundation
 struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     private let fallback = HeuristicCandidateRanker()
     private let encoder = RankingFeatureEncoder()
+    private let predictionCache = CandidatePredictionCache()
     private let listwiseRanker = CoreMLListwiseCandidateRanker()
     private let model: MLModel?
     private let resolvedModelPath: String?
@@ -11,6 +12,8 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     private let resolvedInputShape: [NSNumber]
     private let resolvedInputDataType: MLMultiArrayDataType
     private let resolvedOutputDescription: String
+    private let featureContract: CandidateFeatureContract
+    private let featureContractDescription: String
     let isModelLoaded: Bool
 
     var isListwiseRerankingAvailable: Bool { listwiseRanker.isModelLoaded }
@@ -24,16 +27,25 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             resolvedInputShape = [1, NSNumber(value: RankingFeatureVector.expectedDimension)]
             resolvedInputDataType = .float32
             resolvedOutputDescription = "disabled"
+            featureContract = .legacySegmentsV1
+            featureContractDescription = "disabled"
         } else {
             let url = Self.resolveExternalModelURL(modelName: modelName)
             let configuration = Self.makeModelConfiguration()
             resolvedComputeUnits = configuration.computeUnits
             let loadedModel = url.flatMap { try? MLModel(contentsOf: $0, configuration: configuration) }
+            let metadata = loadedModel?.modelDescription.metadata[.creatorDefinedKey] as? [String: String]
+            let declaredContract = metadata?["unifyime.feature_contract"]
+            // 已發布且未標記的舊模型採舊片段格式；不將相同維度視為新格式相容。
+            let contractName = declaredContract ?? CandidateFeatureContract.legacySegmentsV1.rawValue
+            let parsedContract = CandidateFeatureContract(rawValue: contractName)
+            featureContract = parsedContract ?? .legacySegmentsV1
+            featureContractDescription = declaredContract ?? "legacy_segments_v1 (metadata_missing)"
             let constraint = loadedModel?.modelDescription
                 .inputDescriptionsByName["features"]?.multiArrayConstraint
             let shape = constraint?.shape ?? [1, NSNumber(value: RankingFeatureVector.expectedDimension)]
             let featureCount = shape.map(\.intValue).reduce(1, *)
-            if featureCount == RankingFeatureVector.expectedDimension {
+            if featureCount == RankingFeatureVector.expectedDimension, parsedContract != nil {
                 model = loadedModel
                 resolvedModelPath = loadedModel == nil ? nil : url?.path
                 resolvedInputShape = shape
@@ -46,7 +58,8 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
                 resolvedModelPath = nil
                 resolvedInputShape = [1, NSNumber(value: RankingFeatureVector.expectedDimension)]
                 resolvedInputDataType = .float32
-                resolvedOutputDescription = "invalid_input_dimension=\(featureCount)"
+                resolvedOutputDescription = parsedContract == nil
+                    ? "unsupported_feature_contract" : "invalid_input_dimension=\(featureCount)"
             }
         }
         isModelLoaded = model != nil
@@ -66,7 +79,11 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             return heuristicScore
         }
 
-        let vector = encoder.encode(unit: unit, context: context)
+        let vector = encoder.encode(unit: unit, context: context, contract: featureContract)
+        if let rawScore = predictionCache.value(for: vector.values) {
+            return blendedScore(heuristicScore: heuristicScore, aiScore: rawScore,
+                mode: engineMode, coreMLOutputOnly: coreMLOutputOnly)
+        }
         do {
             let input = try MLMultiArray(
                 shape: resolvedInputShape,
@@ -78,6 +95,7 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             let provider = try MLDictionaryFeatureProvider(dictionary: ["features": MLFeatureValue(multiArray: input)])
             let output = try model.prediction(from: provider)
             if let rawScore = CoreMLScoreReader.scalar(from: output) {
+                predictionCache.store(rawScore, for: vector.values)
                 return blendedScore(
                     heuristicScore: heuristicScore,
                     aiScore: rawScore,
@@ -96,17 +114,50 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
         units.map { score(unit: $0, context: context) }
     }
 
+    func ranked(units: [CandidateUnit], context: CandidateSelectionContext, limit: Int) -> [RankedCandidate] {
+        guard limit > 0, !units.isEmpty else { return [] }
+        let mode = currentCandidateEngineMode
+        let env = ProcessInfo.processInfo.environment
+        let onlyAI = mode == .aiDecides || env["UNIFYIME_COREML_ONLY_RANKER"] == "1"
+            || env["FASTCHIME_COREML_ONLY_RANKER"] == "1"
+        // 純模型模式沒有可用的基礎分數上界，維持完整推論。
+        if onlyAI && mode != .traditionalOnly {
+            return Array(zip(units, scores(units: units, context: context)).compactMap { unit, score in
+                score.isFinite ? RankedCandidate(unit: unit, score: score) : nil
+            }.sorted(by: candidateRanksBefore).prefix(limit))
+        }
+        let base = zip(units, fallback.scores(units: units, context: context)).map {
+            RankedCandidate(unit: $0.0, score: $0.1)
+        }.sorted(by: candidateRanksBefore)
+        guard model != nil, mode != .traditionalOnly else { return Array(base.prefix(limit)) }
+        let bound = scoreScale * (mode == .traditionalPreferredAIAssist ? 0.35 : 1.0)
+        var selected: [RankedCandidate] = []
+        for candidate in base {
+            // 只有連理論最高分也嚴格落後第 K 名時才停止；平手仍須評分。
+            if selected.count == limit, let last = selected.last,
+               candidate.score + bound < last.score { break }
+            let value = score(unit: candidate.unit, context: context)
+            guard value.isFinite else { continue }
+            selected.append(RankedCandidate(unit: candidate.unit, score: value))
+            selected.sort(by: candidateRanksBefore)
+            if selected.count > limit { selected.removeLast() }
+        }
+        return selected
+    }
+
+    private var scoreScale: Double {
+        let configured = ProcessInfo.processInfo.environment["UNIFYIME_COREML_SCORE_SCALE"]
+            .flatMap(Double.init) ?? 160.0
+        return configured.isFinite ? min(max(0.0, configured), 160.0) : 160.0
+    }
+
     private func blendedScore(
         heuristicScore: Double,
         aiScore: Double,
         mode: CandidateEngineMode,
         coreMLOutputOnly: Bool
     ) -> Double {
-        let processEnv = ProcessInfo.processInfo.environment
-        let configuredScale = processEnv["UNIFYIME_COREML_SCORE_SCALE"]
-            .flatMap(Double.init) ?? 160.0
-        let safeScale = configuredScale.isFinite ? max(0.0, configuredScale) : 160.0
-        let scaledAI = tanh(aiScore / 3.0) * safeScale
+        let scaledAI = tanh(aiScore / 3.0) * scoreScale
         if coreMLOutputOnly {
             return scaledAI
         }
@@ -134,7 +185,8 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             "model_path=\(resolvedModelPath ?? "missing")",
             "compute_units=\(resolvedComputeUnits.map(Self.computeUnitDescription(for:)) ?? "n/a")",
             "input_shape=\(resolvedInputShape.map(\.intValue))",
-            "output=\(resolvedOutputDescription)"
+            "output=\(resolvedOutputDescription)",
+            "feature_contract=\(featureContractDescription)"
         ] + [listwiseRanker.debugStatus()]).joined(separator: "\n")
     }
 
@@ -202,5 +254,26 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             return url
         }
         return nil
+    }
+}
+
+/// 每個模型實例獨立保存原始預測；不快取會隨個人紀錄改變的混合分數。
+private final class CandidatePredictionCache {
+    private let lock = NSLock()
+    private var values: [[Double]: Double] = [:]
+    private var order: [[Double]] = []
+    private let capacity = 512
+
+    func value(for key: [Double]) -> Double? {
+        lock.lock(); defer { lock.unlock() }
+        return values[key]
+    }
+
+    func store(_ value: Double, for key: [Double]) {
+        lock.lock(); defer { lock.unlock() }
+        guard values[key] == nil else { return }
+        if order.count >= capacity { values.removeValue(forKey: order.removeFirst()) }
+        order.append(key)
+        values[key] = value
     }
 }
