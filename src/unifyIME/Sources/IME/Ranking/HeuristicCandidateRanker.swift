@@ -1,15 +1,21 @@
 import Foundation
 
 struct HeuristicCandidateRanker: UnifiedCandidateRanker {
+    private static let phraseStats = LexiconStore.loadPhraseContextStats()
+
     func score(unit: CandidateUnit, context: CandidateSelectionContext) -> Double {
-        let script = RankingFeatureEncoder().encode(unit: unit, context: context).values
-        let rankPenalty = Double(unit.baseRank * 40)
-        let spanBonus = Double(context.spanLength * 1000)
-        let phraseBonus = unit.surface.count > 1 ? 120.0 : 0.0
-        let exactReadingPenalty = unit.surface == context.combinedToken ? 200.0 : 0.0
-        let contextBonus = context.precedingValues.isEmpty ? 0.0 : min(Double(unit.surface.count - 1) * 25.0, 75.0)
-        let languageBias = unit.languageID == "zh-Hant" ? 20.0 : 0.0
-        let hanBias = script[15] > 0.5 ? 10.0 : 0.0
-        return PersonalVocabularyStore.bonus(language: unit.languageID, reading: unit.readingOrToken, surface: unit.surface) + spanBonus + phraseBonus + contextBonus + languageBias + hanBias - rankPenalty - exactReadingPenalty
+        let rankPenalty = Double(unit.baseRank) * 40.0
+        let count = UserFrequencyStore.frequency(languageID: unit.languageID,
+            reading: unit.readingOrToken, surface: unit.surface)
+        let usageBonus = count > 0 ? min(log2(Double(count) + 1.0) * 40.0, 400.0) : 0.0
+        let preference = PersonalVocabularyStore.bonus(language: unit.languageID,
+            reading: unit.readingOrToken, surface: unit.surface)
+        // 語料證據按涵蓋字數計入，避免每多切一個詞就多領固定獎勵。
+        // 同音排序只在此計分，呼叫端不得再加使用紀錄或個人偏好。
+        let weight = Self.phraseStats.readingSurfaceWeights[unit.readingOrToken]?[unit.surface] ?? 0
+        let corpusBonus = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
+            && unit.spanLength > 1 && weight.isFinite && weight > 0
+            ? min(log10(weight + 1.0) * 120.0, 500.0) * Double(unit.spanLength) : 0.0
+        return corpusBonus + usageBonus + preference - rankPenalty
     }
 }

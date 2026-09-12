@@ -32,7 +32,7 @@ MCP 由 Agent 作為子程序啟動，不開放網路連接埠，不需要 Pytho
 | `vocabulary_list` | 查詢個人詞彙及目前 revision，可用 query 篩選、offset 分頁 |
 | `vocabulary_upsert` | 新增詞彙或更新 priority，須提供剛讀取的 revision |
 | `vocabulary_remove` | 刪除指定個人詞彙偏好，系統詞庫及實際詞頻仍保留 |
-| `candidate_preview` | 預覽精確注音的候選召回順序，並非完整上下文選字預測 |
+| `candidate_preview` | 以共用計分預覽精確注音候選，包含個人偏好與選字紀錄；並非完整上下文選字預測 |
 | `usage_list` | 依實際選字次數列出彙整詞頻，可篩選與分頁；最近數秒可能尚未寫入磁碟 |
 
 第一版支援繁體中文注音詞彙，每筆 1–8 個中文字、一字一音節。例如新增偏好：

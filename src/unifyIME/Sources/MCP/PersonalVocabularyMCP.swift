@@ -91,7 +91,12 @@ enum PersonalVocabularyMCP {
             guard let syllables = args["syllables"] as? [String] else { throw PersonalVocabularyStore.failure("需提供逐字注音。") }
             try PersonalVocabularyStore.validate(.init(syllables: syllables, surface: String(repeating: "字", count: syllables.count), priority: 0))
             PersonalVocabularyStore.loadSnapshot()
-            return ["candidates": Array(SessionCtl.resolveCandidates(for: syllables.joined()).prefix(50))]
+            let reading = syllables.joined()
+            let candidates = SessionCtl.resolveCandidates(for: reading)
+            let ranked = SessionCtl.rankCandidates(candidates, allReadings: syllables,
+                combinedReading: reading, spanLength: syllables.count, precedingValues: [],
+                followingReadings: [], focusedReading: reading)
+            return ["candidates": Array(ranked.prefix(50))]
         }
         if let value = args["query"], !(value is String) { throw PersonalVocabularyStore.failure("query 需為文字。") }
         let query = args["query"] as? String ?? ""

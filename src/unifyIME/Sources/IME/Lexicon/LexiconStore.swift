@@ -5,11 +5,13 @@ private let lexiconRecallLimit = 20
 struct LexiconStore {
     struct PhraseContextStats {
         let surfaceWeights: [String: Double]
+        let readingSurfaceWeights: [String: [String: Double]]
         let readingCandidateCounts: [String: Int]
         let readingBestLengths: [String: Int]
 
         static let empty = PhraseContextStats(
             surfaceWeights: [:],
+            readingSurfaceWeights: [:],
             readingCandidateCounts: [:],
             readingBestLengths: [:]
         )
@@ -241,6 +243,7 @@ struct LexiconStore {
         }
 
         var surfaceWeights = [String: Double]()
+        var readingSurfaceWeights = [String: [String: Double]]()
         var readingCandidateCounts = [String: Int]()
         var readingBestLengths = [String: Int]()
 
@@ -252,14 +255,17 @@ struct LexiconStore {
             guard !reading.isEmpty, !phrase.isEmpty else { continue }
 
             let rawWeight = parts.count >= 3 ? Double(parts[2]) ?? 1.0 : 1.0
+            guard rawWeight.isFinite else { continue }
             let weight = max(rawWeight, 1.0)
             surfaceWeights[phrase] = max(surfaceWeights[phrase] ?? 0.0, weight)
+            readingSurfaceWeights[reading, default: [:]][phrase] = max(readingSurfaceWeights[reading]?[phrase] ?? 0, weight)
             readingCandidateCounts[reading, default: 0] += 1
             readingBestLengths[reading] = max(readingBestLengths[reading] ?? 0, phrase.count)
         }
 
         return PhraseContextStats(
             surfaceWeights: surfaceWeights,
+            readingSurfaceWeights: readingSurfaceWeights,
             readingCandidateCounts: readingCandidateCounts,
             readingBestLengths: readingBestLengths
         )

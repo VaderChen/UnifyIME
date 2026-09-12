@@ -93,28 +93,7 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     }
 
     func scores(units: [CandidateUnit], context: CandidateSelectionContext) -> [Double] {
-        guard !units.isEmpty else { return [] }
-        let heuristicScores = units.map { fallback.score(unit: $0, context: context) }
-        guard model != nil, currentCandidateEngineMode != .traditionalOnly else {
-            return heuristicScores
-        }
-
-        // NN is advisory: the heuristic rank remains the primary ordering. The
-        // model may only add a bounded consensus bonus to its top candidate when
-        // that candidate is already present in this algorithm-generated window.
-        let modelAwareScores = units.map { score(unit: $0, context: context) }
-        guard let nnTopIndex = modelAwareScores.indices.max(by: {
-            modelAwareScores[$0] == modelAwareScores[$1]
-                ? units[$0].baseRank > units[$1].baseRank
-                : modelAwareScores[$0] < modelAwareScores[$1]
-        }) else { return heuristicScores }
-        let assistBonus = 60.0
-        if isRuntimeTraceEnabled {
-            appendRuntimeTrace("nn.assist reading=\(context.combinedToken) selected=\(units[nnTopIndex].surface) heuristicTop=\(units[heuristicScores.indices.max { heuristicScores[$0] < heuristicScores[$1] } ?? 0].surface) bonus=\(assistBonus) candidateCount=\(units.count)")
-        }
-        return units.indices.map { index in
-            heuristicScores[index] + (index == nnTopIndex ? assistBonus : 0.0)
-        }
+        units.map { score(unit: $0, context: context) }
     }
 
     private func blendedScore(
@@ -126,7 +105,8 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
         let processEnv = ProcessInfo.processInfo.environment
         let configuredScale = processEnv["UNIFYIME_COREML_SCORE_SCALE"]
             .flatMap(Double.init) ?? 160.0
-        let scaledAI = tanh(aiScore / 3.0) * configuredScale
+        let safeScale = configuredScale.isFinite ? max(0.0, configuredScale) : 160.0
+        let scaledAI = tanh(aiScore / 3.0) * safeScale
         if coreMLOutputOnly {
             return scaledAI
         }

@@ -1810,12 +1810,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             }
             let modelScores = candidateRanker.scores(units: units, context: context)
             let scored = zip(units, modelScores).map { unit, modelScore -> RankedCandidate in
-                let value = unit.surface
-                let userFreq = UserFrequencyStore.frequency(languageID: langID, reading: combinedReading, surface: value)
-                let userBoost = userFreq >= 2 ? min(log2(Double(userFreq) + 1.0) * 120.0, 600.0) : 0.0
-                let spanBonus = value.count >= spanLength && spanLength > 1 ? 250.0 : 0.0
-                appendFocusedTrace("rank.score reading=\(combinedReading) candidate=\(value) inputRank=\(unit.baseRank) model=\(String(format: "%.3f", modelScore)) userFreq=\(userFreq) userBoost=\(String(format: "%.1f", userBoost)) spanBonus=\(String(format: "%.1f", spanBonus)) total=\(String(format: "%.3f", modelScore + userBoost + spanBonus))")
-                return RankedCandidate(unit: unit, score: modelScore + userBoost + spanBonus)
+                RankedCandidate(unit: unit, score: modelScore)
             }
             let ranked = scored
                 .sorted {

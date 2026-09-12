@@ -94,12 +94,9 @@ enum PersonalVocabularyStore {
         guard !custom.isEmpty else { return base }
         var seen = Set<String>()
         let merged = (base + custom.map(\.surface)).filter { seen.insert($0).inserted }
-        let weights = Dictionary(custom.map { ($0.surface, $0.priority) }, uniquingKeysWith: { _, new in new })
-        return merged.enumerated().sorted {
-            let a = weights[$0.element] ?? 0, b = weights[$1.element] ?? 0
-            return a == b ? $0.offset < $1.offset : a > b
-        }.map(\.element)
+        return merged
     }
+
     static func bonus(language: String, reading: String, surface: String) -> Double {
         guard language == "zh-Hant" else { return 0 }
         return Double(entries(reading: reading).first { $0.surface == surface }?.priority ?? 0)
