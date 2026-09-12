@@ -27,7 +27,7 @@
 
 ## 安裝與啟用
 
-適用於 macOS 13 或更新版本。請從 [GitHub Releases](https://github.com/VaderChen/UnifyIME/releases) 選擇符合 Mac 架構的 DMG：`arm64` 為 Apple 晶片，`x86_64` 為 Intel；實際提供的版本以發布頁附件為準。
+目前發布的安裝檔需要 macOS 15 或更新版本。請從 [GitHub Releases](https://github.com/VaderChen/UnifyIME/releases) 選擇符合 Mac 架構的 DMG：`arm64` 為 Apple 晶片，`x86_64` 為 Intel；實際提供的版本與最低系統需求以發布頁為準。
 
 1. 開啟下載的 DMG。
 2. 雙擊帶有全一輸入法圖示的 **「安裝全一輸入法」**，程式會自動安裝並啟動輸入法。
