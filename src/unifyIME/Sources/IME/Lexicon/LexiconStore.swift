@@ -1,7 +1,5 @@
 import Foundation
 
-private let lexiconRecallLimit = 20
-
 struct LexiconStore {
     struct PhraseContextStats {
         let surfaceWeights: [String: Double]
@@ -19,27 +17,6 @@ struct LexiconStore {
 
     private static let toneMarks = CharacterSet(charactersIn: "ˇˋˊ˙")
     private static let allowedCandidatePunctuation = CharacterSet(charactersIn: "，。、！？：；（）「」『』《》〈〉—…．·")
-    private static let bopomofoKeyRows = [
-        Array("1234567890-"),
-        Array("qwertyuiop"),
-        Array("asdfghjkl;"),
-        Array("zxcvbnm,./")
-    ]
-    private static let bopomofoKeyToSymbol: [Character: Character] = [
-        "1": "ㄅ", "q": "ㄆ", "a": "ㄇ", "z": "ㄈ",
-        "2": "ㄉ", "w": "ㄊ", "s": "ㄋ", "x": "ㄌ",
-        "e": "ㄍ", "d": "ㄎ", "c": "ㄏ",
-        "r": "ㄐ", "f": "ㄑ", "v": "ㄒ",
-        "5": "ㄓ", "t": "ㄔ", "g": "ㄕ", "b": "ㄖ",
-        "y": "ㄗ", "h": "ㄘ", "n": "ㄙ",
-        "u": "ㄧ", "j": "ㄨ", "m": "ㄩ",
-        "8": "ㄚ", "i": "ㄛ", "k": "ㄜ", ",": "ㄝ",
-        "9": "ㄞ", "o": "ㄟ", "l": "ㄠ", ".": "ㄡ",
-        "0": "ㄢ", "p": "ㄣ", ";": "ㄤ", "/": "ㄥ",
-        "-": "ㄦ",
-        "3": "ˇ", "4": "ˋ", "6": "ˊ", "7": "˙"
-    ]
-    private static let bopomofoNeighborMap = buildBopomofoNeighborMap()
     private static let candidateCacheLock = NSLock()
     private static let candidateCacheCapacity = 512
     private static var candidateCache: [String: [String]] = [:]
@@ -86,9 +63,14 @@ struct LexiconStore {
     }
 
     init(overrideCharacterMap: [String: [String]]) {
-        self.overrideCharacterMap = overrideCharacterMap
         phraseCandidateMap = Self.loadPhraseCandidateMap()
-        commonCharacterMap = Self.loadCommonCharacterMap(overrides: overrideCharacterMap)
+        let sourceCommon = Self.loadCommonCharacterMap()
+        self.overrideCharacterMap = Self.validatedOverrides(overrideCharacterMap,
+            common: sourceCommon, phrases: phraseCandidateMap)
+        // 通過驗證後才合併，反查、前綴與中英辨識也只會看到合法配對。
+        commonCharacterMap = self.overrideCharacterMap.reduce(into: sourceCommon) { result, entry in
+            result[entry.key] = entry.value + (result[entry.key] ?? []).filter { !entry.value.contains($0) }
+        }
         readingPrefixes = Self.loadReadingPrefixes(
             phraseCandidateMap: phraseCandidateMap,
             commonCharacterMap: commonCharacterMap
@@ -107,22 +89,8 @@ struct LexiconStore {
         var merged: [String] = []
         var seen = Set<String>()
         appendCandidates(forReading: buffer, into: &merged, seen: &seen)
-        // 明確聲調（含輕聲）是查詢條件，不能去調、跨調或以近音補字。
-        // 未標聲調沿用原本的補候選規則，避免改變尚在輸入中的行為。
-        if !containsToneMark(buffer) {
-            if isSingleSyllableReading(buffer), merged.count <= 2 {
-                for reading in toneExpandedVariants(for: buffer) {
-                    appendCandidates(forReading: reading, into: &merged, seen: &seen, limit: 2)
-                    if merged.count >= lexiconRecallLimit { break }
-                }
-            }
-            if isSingleSyllableReading(buffer), merged.count <= 1 {
-                for variant in neighborReadingVariants(for: buffer) {
-                    appendCandidates(forReading: variant, into: &merged, seen: &seen, limit: 2)
-                    if merged.count >= lexiconRecallLimit { break }
-                }
-            }
-        }
+        // 沒有調號代表第一聲，不代表可跨調或以鄰鍵補字。
+        // 未完成音節由組字狀態處理，不能污染精確讀音查詢。
         let filtered = merged.filter(Self.isDisplayableCandidate(_:))
         var resolved = filtered.isEmpty ? (merged.isEmpty ? [buffer] : merged) : filtered
         if isSingleSyllableReading(buffer) {
@@ -192,7 +160,7 @@ struct LexiconStore {
         return true
     }
 
-    private static func loadCommonCharacterMap(overrides: [String: [String]]) -> [String: [String]] {
+    private static func loadCommonCharacterMap() -> [String: [String]] {
         var result = [String: [String]]()
         if let url = resourceURL(named: "common_map", ext: "tsv"),
            let text = try? String(contentsOf: url, encoding: .utf8) {
@@ -210,15 +178,43 @@ struct LexiconStore {
                 }
             }
         }
-        for (key, overrideValues) in overrides {
-            var list = result[key, default: []]
-            for value in overrideValues.reversed() {
-                list.removeAll { $0 == value }
-                list.insert(value, at: 0)
-            }
-            result[key] = list
-        }
         return result
+    }
+
+    /// 覆寫只能調整合法讀音的來源順位，不得建立去調或錯配別名。
+    /// 新短語可依每個字的正式讀音組成；整詞讀音優先保留詞庫中的異讀與變調。
+    static func validatedOverrides(_ overrides: [String: [String]]) -> [String: [String]] {
+        validatedOverrides(overrides, common: loadCommonCharacterMap(), phrases: loadPhraseCandidateMap())
+    }
+
+    private static func validatedOverrides(_ overrides: [String: [String]],
+        common: [String: [String]], phrases: [String: [String]]) -> [String: [String]] {
+        var characterReadings: [Character: Set<String>] = [:]
+        for (reading, values) in common {
+            for value in values where value.count == 1 && isDisplayableCandidate(value) {
+                characterReadings[value.first!, default: []].insert(reading)
+            }
+        }
+        return overrides.reduce(into: [:]) { result, entry in
+            let (reading, values) = entry
+            let valid = values.filter { value in
+                if common[reading]?.contains(value) == true || phrases[reading]?.contains(value) == true { return true }
+                guard !value.isEmpty, value.count <= 8 else { return false }
+                var suffixes: Set<String> = [reading]
+                for character in value {
+                    var next: Set<String> = []
+                    for suffix in suffixes {
+                        for syllable in characterReadings[character] ?? [] where suffix.hasPrefix(syllable) {
+                            next.insert(String(suffix.dropFirst(syllable.count)))
+                        }
+                    }
+                    suffixes = next
+                    if suffixes.isEmpty { return false }
+                }
+                return suffixes.contains("")
+            }
+            if !valid.isEmpty { result[reading] = valid }
+        }
     }
 
     private static func loadPhraseCandidateMap() -> [String: [String]] {
@@ -339,35 +335,6 @@ struct LexiconStore {
         }
     }
 
-    private func neighborReadingVariants(for reading: String) -> [String] {
-        guard !reading.isEmpty else { return [] }
-        let symbols = Array(reading)
-        var variants: [String] = []
-
-        for (index, symbol) in symbols.enumerated() {
-            guard let neighbors = Self.bopomofoNeighborMap[symbol], !neighbors.isEmpty else { continue }
-            for neighbor in neighbors {
-                var mutated = symbols
-                mutated[index] = neighbor
-                let candidate = String(mutated)
-                if candidate != reading, !variants.contains(candidate) {
-                    variants.append(candidate)
-                    if variants.count >= 12 {
-                        return variants
-                    }
-                }
-            }
-        }
-
-        return variants
-    }
-
-    private func toneExpandedVariants(for reading: String) -> [String] {
-        guard !reading.isEmpty, !containsToneMark(reading) else { return [] }
-        let tones: [Character] = ["ˇ", "ˋ", "ˊ", "˙"]
-        return tones.map { reading + String($0) }
-    }
-
     private func isSingleSyllableReading(_ reading: String) -> Bool {
         let symbolCount = reading.filter { char in
             !String(char).unicodeScalars.contains { Self.toneMarks.contains($0) }
@@ -375,32 +342,4 @@ struct LexiconStore {
         return symbolCount > 0 && symbolCount <= 4
     }
 
-    private static func buildBopomofoNeighborMap() -> [Character: [Character]] {
-        var result = [Character: [Character]]()
-
-        for (rowIndex, row) in bopomofoKeyRows.enumerated() {
-            for (columnIndex, key) in row.enumerated() {
-                guard let symbol = bopomofoKeyToSymbol[key] else { continue }
-                var neighbors: [Character] = []
-
-                for neighborRow in max(0, rowIndex - 1)...min(bopomofoKeyRows.count - 1, rowIndex + 1) {
-                    let rowKeys = bopomofoKeyRows[neighborRow]
-                    for neighborColumn in max(0, columnIndex - 1)...min(rowKeys.count - 1, columnIndex + 1) {
-                        let neighborKey = rowKeys[neighborColumn]
-                        guard neighborKey != key, let neighborSymbol = bopomofoKeyToSymbol[neighborKey] else { continue }
-                        if toneMarks.contains(UnicodeScalar(String(neighborSymbol))!) { continue }
-                        if !neighbors.contains(neighborSymbol) {
-                            neighbors.append(neighborSymbol)
-                        }
-                    }
-                }
-
-                if !toneMarks.contains(UnicodeScalar(String(symbol))!) {
-                    result[symbol] = neighbors
-                }
-            }
-        }
-
-        return result
-    }
 }

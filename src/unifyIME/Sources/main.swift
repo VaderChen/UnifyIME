@@ -616,25 +616,17 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "'": "、",
         "\\": "、"
     ]
-    static let overrideCharacterMap: [String: [String]] = [
+    static let overrideCharacterMap: [String: [String]] = LexiconStore.validatedOverrides([
         "ㄋㄧˇ": ["你"],
-        "ㄋㄧ": ["你"],
         "ㄨㄛˇ": ["我"],
-        "ㄨㄛ": ["我"],
         "ㄊㄚ": ["他"],
-        "ㄊㄚㄇㄣ": ["他們"],
         "ㄊㄚˇ": ["塔"],
-        "ㄊㄚˋ": ["大"],
         "ㄕˋ": ["是", "試"],
-        "ㄕ": ["是"],
         "ㄕˋㄕˋ": ["試試"],
         "ㄒㄧㄣ": ["新", "心"],
         "ㄅㄨˋ": ["不"],
-        "ㄅㄨ": ["不"],
         "ㄧ": ["一"],
-        "ㄧ˙": ["一"],
         "ㄦˋ": ["二"],
-        "ㄙㄢ˙": ["三"],
         "ㄙˋ": ["四"],
         "ㄨˋ": ["物"],
         "ㄨˇ": ["五"],
@@ -644,45 +636,33 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄅㄚ": ["八"],
         "ㄐㄧㄡˇ": ["九"],
         "ㄌㄜ˙": ["了"],
-        "ㄌㄜ": ["了"],
         "ㄗㄞˋ": ["在"],
         "ㄗㄞˋㄘㄜˋㄕˋㄧㄒㄧㄚˋ": ["再測試一下"],
         "ㄗㄞˋㄏㄨㄟˊㄌㄞˊ": ["再回來"],
         "ㄗㄞˋㄧˋㄑㄧˇ": ["再一起"],
-        "ㄗㄞ": ["在"],
         "ㄧㄡˇ": ["有"],
-        "ㄧㄡ": ["有"],
         "ㄓㄨㄥ": ["中"],
         "ㄓㄨㄥㄨㄣˊ": ["中文"],
         "ㄓㄨㄥㄍㄨㄛˊ": ["中國"],
         "ㄒㄧㄢ": ["先"],
         "ㄒㄧㄢㄘㄜˋㄕˋㄧㄒㄧㄚˋ": ["先測試一下"],
         "ㄖㄣˊ": ["人"],
-        "ㄖㄣ": ["人"],
-        "ㄖㄣㄇㄣˊ": ["人們"],
         "ㄉㄚˋ": ["大"],
         "ㄒㄧㄠˇ": ["小"],
-        "ㄒㄧㄠ": ["小"],
         "ㄊㄧㄢ": ["天"],
         "ㄐㄧㄣㄊㄧㄢ": ["今天"],
         "ㄇㄧㄥˊㄊㄧㄢ": ["明天"],
         "ㄐㄧㄠˇ": ["較", "角", "腳"],
         "ㄉㄧˋ": ["地"],
-        "ㄉㄧ": ["地"],
         "ㄕㄤˋ": ["上"],
-        "ㄕㄤ": ["上"],
         "ㄓㄥˋ": ["正", "鄭"],
         "ㄓㄥ": ["正"],
         "ㄒㄧㄚˋ": ["下"],
-        "ㄒㄧㄚ": ["下"],
         "ㄌㄞˊ": ["來"],
-        "ㄌㄞ": ["來"],
         "ㄑㄩˋ": ["去"],
-        "ㄑㄩ": ["去"],
         "ㄎㄢˋ": ["看"],
         "ㄎㄢ": ["看"],
         "ㄏㄠˇ": ["好"],
-        "ㄏㄠ": ["好"],
         "ㄏㄠˇㄇㄚ˙": ["好嗎"],
         "ㄏㄠˇㄉㄜ˙": ["好的"],
         "ㄇㄚ˙": ["嗎"],
@@ -695,28 +675,21 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄋㄜ": ["呢"],
         "ㄏㄜˊ": ["和"],
         "ㄇㄣˊ": ["們"],
-        "ㄇㄣ": ["們"],
         "ㄓㄜˋ": ["這"],
-        "ㄓㄜ": ["這"],
         "ㄓㄜˋㄍㄜ˙": ["這個"],
         "ㄋㄚˋ": ["那"],
         "ㄋㄚ": ["那"],
         "ㄋㄚˋㄍㄜ˙": ["那個"],
         "ㄕㄣˊ": ["什"],
-        "ㄕㄣ": ["什"],
         "ㄇㄜ˙": ["麼"],
-        "ㄇㄜ": ["麼"],
         "ㄕㄣˊㄇㄜ˙": ["什麼"],
         "ㄅㄧㄢˋ": ["變", "便"],
         "ㄒㄧㄝˇ": ["寫"],
-        "ㄒㄧㄝ": ["寫"],
         "ㄒㄧㄝˇㄗˋ": ["寫字"],
         "ㄉㄚˇ": ["打"],
         "ㄉㄚˇㄗˋ": ["打字"],
         "ㄗˋ": ["字"],
-        "ㄗ": ["字"],
         "ㄘㄜˋ": ["測"],
-        "ㄘㄜ": ["測"],
         "ㄕˋㄐㄧㄝˋ": ["世界"],
         "ㄘㄜˋㄕˋㄧㄒㄧㄚˋ": ["測試一下"],
         "ㄉㄥˇㄧˊㄒㄧㄚˋ": ["等一下"],
@@ -725,11 +698,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄑㄧㄥˇ": ["請"],
         "ㄑㄧㄥˇㄅㄤ": ["請幫"],
         "ㄓˊㄐㄧㄝㄅㄚˋ": ["直接把"],
-        "ㄒㄧㄢㄑㄩ": ["先去"],
         "ㄍㄟˇ": ["給"],
         "ㄒㄧㄢㄍㄟˇ": ["先給"],
-        "ㄊㄧㄝㄐㄧˇㄨㄛ": ["貼給我"],
-        "ㄐㄧˇㄨㄛ": ["給我"],
         "ㄏㄨㄛˋㄌㄢˊㄎㄨㄤˋ": ["和藍框"],
         "ㄧㄡˇㄙㄨㄛˇㄉㄧˋ": ["有所的"],
         "ㄨㄛˇㄧㄠˋㄗㄞˋ": ["我要再"],
@@ -737,7 +707,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄩˋㄗㄨㄟˋㄏㄡˋ": ["與最後"],
         "ㄉㄧˋㄨㄣˊㄗˋ": ["的文字"],
         "ㄗㄞˋㄔㄨㄒㄧㄢˋ": ["再出現"],
-        "ㄅㄧㄝˊㄉㄜ˙ㄗ": ["別的字"],
         "ㄅㄧㄝˊㄉㄜ˙ㄗˋ": ["別的字"],
         "ㄧˋㄒㄧㄝ": ["一些"],
         "ㄧㄒㄧㄝ": ["一些"],
@@ -768,7 +737,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄔㄜ": ["車"],
         "ㄐㄧㄚ": ["家"],
         "ㄏㄨㄟˊㄐㄧㄚ": ["回家"],
-        "ㄕㄤㄅㄢ": ["上班"],
         "ㄒㄧㄚˋㄅㄢ": ["下班"],
         "ㄌㄠˇㄕ": ["老師"],
         "ㄒㄩㄝˊㄕㄥ": ["學生"],
@@ -778,10 +746,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄌㄢˊ": ["藍", "籃"],
         "ㄨㄤˇㄌㄨˋ": ["網路"],
         "ㄔㄥˊㄍㄨㄥ": ["成功"],
-        "ㄕㄧㄅㄞˋ": ["失敗"],
         "ㄏㄨㄢㄧㄥˊ": ["歡迎"],
-        "ㄘㄜˋㄕˋ": ["測試"]
-        ,
+        "ㄘㄜˋㄕˋ": ["測試"],
         "ㄐㄧㄡˋ": ["就"],
         "ㄐㄧㄡˋㄓˊㄐㄧㄝ": ["就直接"],
         "ㄏㄨㄚˋㄇㄧㄢˋ": ["畫面", "畫麵"],
@@ -789,8 +755,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         "ㄌㄧㄢˊㄒㄩˋ": ["連續"],
         "ㄕㄨㄖㄨˋ": ["輸入"],
         "ㄕㄨㄖㄨˋㄕˊ": ["輸入時"],
-        "ㄧㄠˋㄒㄧㄢ": ["要先"]
-    ]
+        "ㄧㄠˋㄒㄧㄢ": ["要先"],
+    ])
     static let protectedNumericReadings: Set<String> = [
         "ㄧ", "ㄧ˙", "ㄦˋ", "ㄙㄢ", "ㄙㄢ˙", "ㄙˋ", "ㄨˇ", "ㄌㄧㄡˋ", "ㄑㄧ", "ㄅㄚ", "ㄐㄧㄡˇ", "ㄌㄧㄥˊ"
     ]
@@ -2174,14 +2140,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     static func resolveCommittedText(allReadings: [String]) -> String {
         if let protected = protectedSegments(for: allReadings) {
             return protected.map(\.value).joined()
-        }
-        let full = allReadings.joined()
-        if let override = overrideCharacterMap[full]?.first {
-            return override
-        }
-        let exact = resolveCandidates(for: full)
-        if exact != [full], let first = exact.first {
-            return first
         }
         return resolveWalk(allReadings).map(\.value).joined()
     }

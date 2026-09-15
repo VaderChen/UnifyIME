@@ -124,6 +124,16 @@ enum MixedCompositionResolver {
         }
         storeIncrementalAnalysis(analysis, for: rawBuffer)
 
+        // 尚待聲調的合法音節不能因第一聲沒有字，就被當作英文原鍵串送入正文。
+        // 僅保護沒有英文詞依據的待完成尾端；完整英文與既有英文前綴照常辨識。
+        let pendingRaw = primaryState.pendingRawInput
+        if !pendingReading.isEmpty, !hasExactPendingChinese,
+           BopomofoOrderCorrection.normalize(pendingReading) != nil,
+           !pendingRaw.isEmpty, rawBuffer.hasSuffix(pendingRaw),
+           EnglishIMEEngine.exactSurfaceCandidates(for: pendingRaw).isEmpty,
+           !prefersWholeEnglishSpan {
+            return MixedCompositionResolution(analysis: analysis, materializedState: nil)
+        }
 
         let merge = analysis.merge
         let usesSecondaryTarget = merge.coverages.contains { $0.targetID != primaryTargetID }

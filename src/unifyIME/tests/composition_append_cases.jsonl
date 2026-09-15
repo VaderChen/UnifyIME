@@ -9,7 +9,15 @@
 {"name": "將來", "raw": "ru;x96", "expected": "將來"}
 {"name": "再見", "raw": "y94ru04", "expected": "再見"}
 {"name": "變長了", "raw": "1u04t;6xk7", "expected": "變長了"}
-{"name": "我現在可以正常處理這個輸入法", "raw": "jivu04y94dk3u35/4t;6tj3xu35k4ek7gjbj4z83", "expected": "我現在可以正常處理這個輸入法"}
+{"name": "我現在可以正常處理這個輸入法", "raw": "ji3vu04y94dk3u35/4t;6tj3xu35k4ek7gjbj4z83", "expected": "我現在可以正常處理這個輸入法"}
 {"name": "我看起來已經很穩定了", "raw": "ji3d04fu3x96u3ru/cp3jp32u/4xk7", "expected": "我看起來已經很穩定了"}
 {"name": "再檢查", "raw": "y94ru03t86", "expected": "再檢查"}
 {"name": "三聲以", "raw": "u3", "expected": "以"}
+{"name": "深綁精確讀音", "raw": "gp 1;3", "expected": "深綁"}
+{"name": "二聲什", "raw": "gp6", "expected": "什"}
+{"name": "先註記有這件事", "raw": "vu05j4ru4u.35k4ru04g4", "expected": "先註記有這件事"}
+{"name": "請先註記有這件事", "raw": "fu/3vu05j4ru4u.35k4ru04g4", "expected": "請先註記有這件事"}
+{"name": "註記有這件事", "raw": "5j4ru4u.35k4ru04g4", "expected": "註記有這件事"}
+{"name": "使用既有功能", "raw": "g3m/4ru4u.3ej/s/6", "expected": "使用既有功能"}
+{"name": "保留既有設定", "raw": "1l3xu.6ru4u.3gk42u/4", "expected": "保留既有設定"}
+{"name": "先住這裡", "raw": "vu05j45k4xu3", "expected": "先住這裡"}

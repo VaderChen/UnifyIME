@@ -53,7 +53,7 @@ CASES = [
     ),
     (
         "long-input-token",
-        "fu/31;jifm,4bp4inputtokeng4z.3dk3u35/4t;6tj3xu3",
+        "fu/31;ji3fm,4bp4inputtokeng4z.3dk3u35/4t;6tj3xu3",
         "請幫我確認 input token 是否可以正常處理",
         True,
     ),
@@ -81,7 +81,7 @@ CASES = [
     ),
     (
         "long-marathon",
-        "fu/31;jifm,4bp4everybodyg4z.3dk3u35/4t;6tj3xu3projectmeetings2u6inputtoken",
+        "fu/31;ji3fm,4bp4everybodyg4z.3dk3u35/4t;6tj3xu3projectmeetings2u6inputtoken",
         "請幫我確認 everybody 是否可以正常處理 project meetings 的 input token",
         True,
     ),
