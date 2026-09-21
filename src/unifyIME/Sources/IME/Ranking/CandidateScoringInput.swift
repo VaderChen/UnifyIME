@@ -33,7 +33,10 @@ struct CandidateScoringInput {
         var recent: [String] = []
         for segment in segments.reversed() where segment.start < index {
             let covered = min(segment.length, index - segment.start)
-            let value = String(segment.value.prefix(covered))
+            // 一個組字單位可能是一整個英文詞或多字候選，完整左文不能
+            // 依音節數截成第一個字元；只有游標位於詞段內才取前綴。
+            let value = covered == segment.length
+                ? segment.value : String(segment.value.prefix(covered))
             if !value.isEmpty { recent.append(value) }
             if recent.count == 3 { break }
         }

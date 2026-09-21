@@ -402,7 +402,33 @@ enum MixedCompositionResolver {
             englishTargetID: englishTargetID
         )
         var candidatesByStart: [Int: [RawSpanCoverage]] = [:]
-        for coverage in coverageCandidates {
+        // 英文詞長不能以破壞相鄰中文音節為代價。只檢查已有明確聲調
+        // 結束的下一音節；未完成尾端與後續英文仍維持原有候選資格。
+        var boundaryValidity: [Int: Bool] = [:]
+        func hasValidFollowingBoundary(_ end: Int) -> Bool {
+            if let cached = boundaryValidity[end] { return cached }
+            var rawSyllables = ""
+            var valid = true
+            for index in end..<min(end + 4, characters.count) {
+                guard let symbol = SessionCtl.mapKeySequence(String(characters[index])) else { break }
+                rawSyllables.append(characters[index])
+                if symbol.contains(where: { "ˊˇˋ˙".contains($0) }) {
+                    var state = UnifiedCompositionState()
+                    CompositionLanguageRegistry.primary.feed(token: rawSyllables, state: &state)
+                    let readings = state.allReadings + (state.currentReading.isEmpty ? [] : [state.currentReading])
+                    let lexicon = SessionCtl.traditionalChineseProvider.lexicon
+                    valid = !readings.isEmpty && readings.allSatisfy { reading in
+                        let candidates = (lexicon.commonCharacterMap[reading] ?? [])
+                            + (lexicon.overrideCharacterMap[reading] ?? [])
+                        return candidates.contains(where: LexiconStore.isDisplayableCandidate)
+                    }
+                    break
+                }
+            }
+            boundaryValidity[end] = valid
+            return valid
+        }
+        for coverage in coverageCandidates where hasValidFollowingBoundary(coverage.end) {
             candidatesByStart[coverage.start, default: []].append(coverage)
         }
 

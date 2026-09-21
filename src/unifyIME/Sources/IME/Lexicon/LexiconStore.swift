@@ -17,10 +17,37 @@ struct LexiconStore {
 
     private static let toneMarks = CharacterSet(charactersIn: "ˇˋˊ˙")
     private static let allowedCandidatePunctuation = CharacterSet(charactersIn: "，。、！？：；（）「」『』《》〈〉—…．·")
-    private static let candidateCacheLock = NSLock()
-    private static let candidateCacheCapacity = 512
-    private static var candidateCache: [String: [String]] = [:]
-    private static var candidateCacheOrder: [String] = []
+    /// 快取跟隨不可變的詞庫實例；不同覆寫表不可共用讀音查詢結果。
+    private final class CandidateCache {
+        private let lock = NSLock()
+        private var values: [String: [String]] = [:]
+        private var order: [String] = []
+        private let capacity = 512
+
+        func lookup(_ reading: String) -> [String]? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let candidates = values[reading] else { return nil }
+            touch(reading)
+            return candidates
+        }
+
+        func store(_ candidates: [String], for reading: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            values[reading] = candidates
+            touch(reading)
+            while order.count > capacity {
+                values.removeValue(forKey: order.removeFirst())
+            }
+        }
+
+        private func touch(_ reading: String) {
+            order.removeAll { $0 == reading }
+            order.append(reading)
+        }
+    }
+    private let candidateCache = CandidateCache()
     let overrideCharacterMap: [String: [String]]
     let phraseCandidateMap: [String: [String]]
     let commonCharacterMap: [String: [String]]
@@ -78,13 +105,9 @@ struct LexiconStore {
     }
 
     func resolveCandidates(for buffer: String) -> [String] {
-        Self.candidateCacheLock.lock()
-        if let cached = Self.candidateCache[buffer] {
-            Self.touchCachedReading(buffer)
-            Self.candidateCacheLock.unlock()
+        if let cached = candidateCache.lookup(buffer) {
             return PersonalVocabularyStore.candidates(reading: buffer, base: cached)
         }
-        Self.candidateCacheLock.unlock()
 
         var merged: [String] = []
         var seen = Set<String>()
@@ -100,9 +123,7 @@ struct LexiconStore {
                 resolved = singles + longer
             }
         }
-        Self.candidateCacheLock.lock()
-        Self.storeCachedCandidates(resolved, for: buffer)
-        Self.candidateCacheLock.unlock()
+        candidateCache.store(resolved, for: buffer)
         return PersonalVocabularyStore.candidates(reading: buffer, base: resolved)
     }
 
@@ -117,20 +138,6 @@ struct LexiconStore {
         appendCandidates(forReading: reading, into: &base, seen: &seen)
         return PersonalVocabularyStore.candidates(reading: reading, base: base).filter {
             $0.count == syllableCount && Self.isDisplayableCandidate($0)
-        }
-    }
-
-    private static func touchCachedReading(_ reading: String) {
-        candidateCacheOrder.removeAll { $0 == reading }
-        candidateCacheOrder.append(reading)
-    }
-
-    private static func storeCachedCandidates(_ candidates: [String], for reading: String) {
-        candidateCache[reading] = candidates
-        touchCachedReading(reading)
-        while candidateCacheOrder.count > candidateCacheCapacity {
-            let evicted = candidateCacheOrder.removeFirst()
-            candidateCache.removeValue(forKey: evicted)
         }
     }
 

@@ -246,13 +246,16 @@ enum PhoneticIMECore {
         let prediction = predict(previewState)
         let candidateEntries = prediction.presentation.candidateEntries
         guard candidateEntries.indices.contains(index),
-              prediction.presentation.focusedSegment != nil else {
-            return false
-        }
-        let chosen = candidateEntries[index].text
-        let key = candidateEntries[index].replacementKey
-        state.segmentOverrides[key] = chosen
-        state.explicitLockedKeys.insert(key)
+              let focus = CompositionPresentationBuilder.segment(
+                for: candidateEntries[index], in: prediction.presentation.baseSegments
+              ) else { return false }
+        let range = focus.start..<(focus.start + focus.length)
+        let selectedSegments = PredictionSnapshot.materializeSelection(
+            entry: candidateEntries[index], focus: focus,
+            baseSegments: prediction.presentation.baseSegments
+        ).filter { $0.start < range.upperBound && range.lowerBound < $0.start + $0.length }
+        guard !selectedSegments.isEmpty else { return false }
+        state.confirmSegments(selectedSegments, replacing: range)
         state.selectedCandidateIndex = 0
         return true
     }
@@ -594,33 +597,52 @@ enum PhoneticIMECore {
     }
 
     private static func baseDisplayedSegments(for state: UnifiedCompositionState) -> [ComposedSegment] {
+        let lockedBase: [ComposedSegment]
         if let protected = protectedSegments(for: state) {
-            return protected
-        }
-        let resolved = resolvedSegmentsRespectingOverrides(for: state)
-        let overridden = resolved.map { segment -> ComposedSegment in
-            let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
-            if let chosen = state.segmentOverrides[key] {
-                return ComposedSegment(languageID: segment.languageID, reading: segment.reading, value: chosen, start: segment.start, length: segment.length, rawLength: rawLength(for: segment.reading))
+            lockedBase = protected
+        } else {
+            let resolved = resolvedSegmentsRespectingOverrides(for: state)
+            let overridden = resolved.map { segment -> ComposedSegment in
+                let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
+                if let chosen = state.segmentOverrides[key] {
+                    return ComposedSegment(languageID: segment.languageID, reading: segment.reading, value: chosen, start: segment.start, length: segment.length, rawLength: rawLength(for: segment.reading))
+                }
+                return segment
             }
-            return segment
+            lockedBase = applyExplicitLocks(to: overridden, state: state)
         }
-        let lockedBase = applyExplicitLocks(to: overridden, state: state)
         guard !state.currentReading.isEmpty else { return lockedBase }
         let insertionIndex = state.currentCompositionCursorIndex()
         let rawSegment = ComposedSegment(languageID: SessionCtl.traditionalChineseProvider.languageID, reading: state.currentReading, value: state.currentReading, start: insertionIndex, length: 1, rawLength: rawLength(for: state.currentReading))
         var inserted = false
         var merged: [ComposedSegment] = []
         for segment in lockedBase {
+            let end = segment.start + segment.length
+            if !inserted, segment.start < insertionIndex, insertionIndex < end,
+               segment.start >= 0, end <= state.allReadings.count {
+                // 顯示時才分開跨越插入點的詞，原讀音座標與確認鎖定保持不變。
+                let prefixReading = state.allReadings[segment.start..<insertionIndex].joined()
+                let suffixReading = state.allReadings[insertionIndex..<end].joined()
+                let prefixLength = insertionIndex - segment.start
+                // 原注音依音節切分；候選依完整字元切分，尾段保留所有剩餘文字。
+                let prefixCharacters = segment.value == segment.reading ? prefixReading.count : prefixLength
+                merged.append(ComposedSegment(languageID: segment.languageID, reading: prefixReading,
+                    value: String(segment.value.prefix(prefixCharacters)), start: segment.start,
+                    length: prefixLength, rawLength: rawLength(for: prefixReading)))
+                merged.append(rawSegment)
+                merged.append(ComposedSegment(languageID: segment.languageID, reading: suffixReading,
+                    value: String(segment.value.dropFirst(prefixCharacters)), start: insertionIndex,
+                    length: end - insertionIndex, rawLength: rawLength(for: suffixReading)))
+                inserted = true
+                continue
+            }
             if !inserted, insertionIndex <= segment.start {
                 merged.append(rawSegment)
                 inserted = true
             }
             merged.append(segment)
         }
-        if !inserted {
-            merged.append(rawSegment)
-        }
+        if !inserted { merged.append(rawSegment) }
         return merged
     }
 

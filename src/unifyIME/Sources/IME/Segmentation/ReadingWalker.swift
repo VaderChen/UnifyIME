@@ -28,10 +28,10 @@ struct ReadingWalker {
         for end in start..<min(tokens.count, start + min(maxSpanLength, 8)) {
             combined += tokens[end].rawValue
             let length = end - start + 1
-            let recalled = lexicon.resolveCandidates(for: combined)
             let candidates = lexicon.compositionCandidates(reading: combined, syllableCount: length)
             if candidates.isEmpty {
                 if length == 1 {
+                    let recalled = lexicon.resolveCandidates(for: combined)
                     let segment = ComposedSegment(languageID: languageID, reading: combined,
                         value: recalled.first ?? combined, start: start, length: 1, rawLength: rawLength(for: combined))
                     edges.append(ScoredEdge(segment: segment, score: -4000.0))

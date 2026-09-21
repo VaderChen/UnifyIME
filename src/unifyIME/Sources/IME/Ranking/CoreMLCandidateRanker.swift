@@ -111,7 +111,11 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     }
 
     func scores(units: [CandidateUnit], context: CandidateSelectionContext) -> [Double] {
-        units.map { score(unit: $0, context: context) }
+        // 無模型或傳統模式共用批次查詢，避免每個同音候選重建詞頻表。
+        if model == nil || currentCandidateEngineMode == .traditionalOnly {
+            return fallback.scores(units: units, context: context)
+        }
+        return units.map { score(unit: $0, context: context) }
     }
 
     func ranked(units: [CandidateUnit], context: CandidateSelectionContext, limit: Int) -> [RankedCandidate] {

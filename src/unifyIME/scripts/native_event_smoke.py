@@ -11,6 +11,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output-dir", type=Path)
+parser.add_argument("--strategy-only", action="store_true", help="只執行隔離策略驗證")
 options = parser.parse_args()
 artifact_root = ROOT / "artifacts" / "native-event-smoke"
 artifact_root.mkdir(parents=True, exist_ok=True)
@@ -34,13 +35,14 @@ injected = r'''
                 let client = NativeProbeClient()
                 let ctl = SessionCtl(server: nil, delegate: nil, client: nil)!
                 var states: [[String: Any]] = []
+                var chosenText = ""
                 func state(_ action: String, _ handled: Bool) -> [String: Any] {
                     let snap = ctl.snapshot()
                     return ["action": action, "handled": handled, "english": shiftEnglishInputActive, "text": snap.markedText,
                         "committed": client.inserted.joined(), "has_composition": ctl.hasComposition,
                         "readings": ctl.allReadings, "pending": ctl.currentReading,
                         "cursor": ctl.currentCompositionCursorIndex(), "utf16_cursor": snap.cursorLocation,
-                        "candidate_mode": ctl.candidateMode, "locks": ctl.explicitLockedKeys.count,
+                        "chosen": chosenText, "candidate_mode": ctl.candidateMode, "locks": ctl.explicitLockedKeys.count,
                         "sources": ctl.unifiedState().sourceInputs,
                         "candidates": snap.candidateEntries.map(\.text)]
                 }
@@ -70,6 +72,14 @@ injected = r'''
                     } else if action.hasPrefix("caps:") { handled = key(0, String(action.dropFirst(5)), .capsLock)
                     } else if action.hasPrefix("shift:") { handled = key(0, String(action.dropFirst(6)), .shift)
                     } else if action == "flush" { ctl.flushPendingRawReplay(); ctl.flushPendingMerge()
+                    } else if action == "choose-alternative" {
+                        let entries = ctl.snapshot().candidateEntries
+                        if let index = entries.indices.dropFirst().first(where: {
+                            !entries[$0].isBopomofoLiteral && entries[$0].replacementReadings == nil && entries[$0].text != entries[0].text
+                        }) {
+                            chosenText = entries[index].text
+                            handled = ctl.applyCandidateSelection(index: index, advance: false) != .failed
+                        } else { handled = false }
                     } else if action == "commit" { ctl.commitComposition(client)
                     } else if action == "deactivate" { ctl.deactivateServer(client)
                     } else if action == "command-enter" { handled = ctl.didCommand(by: #selector(NSResponder.insertNewline(_:)), client: client)
@@ -99,7 +109,7 @@ for folder in [SRC, ROOT/'src/phoneticIME/Sources', ROOT/'src/englishIME/Sources
             assert needle in text
             text = text.replace(needle, needle + injected, 1)
         elif path == SRC/'App/AppEntry.swift':
-            text = text.replace('func runUnifyIMEAppEntry() {', 'func runUnifyIMEAppEntry() {\n    if CommandLine.arguments.contains("audit-native") { SessionCtl.auditNative(); return }', 1)
+            text = text.replace('func runUnifyIMEAppEntry() {', 'func runUnifyIMEAppEntry() {\n    if CommandLine.arguments.contains("audit-native") { SessionCtl.auditNative(); return }\n    if CommandLine.arguments.contains("audit-strategy") { CompositionStrategyProbe.run(); return }', 1)
         elif path == SRC/'App/RuntimeSupport.swift':
             needle = 'FileManager.default.homeDirectoryForCurrentUser\n    .appendingPathComponent("Library/Application Support/UnifyIME", isDirectory: true)'
             assert needle in text
@@ -114,6 +124,9 @@ for folder in [SRC, ROOT/'src/phoneticIME/Sources', ROOT/'src/englishIME/Sources
 client = (ROOT/'src/unifyIME/tests/NativeProbeClient.swift').read_text()
 (COPIES/'Client.swift').write_text(client)
 files.append(str(COPIES/'Client.swift'))
+strategy = ROOT/'src/unifyIME/tests/CompositionStrategyProbe.swift'
+(COPIES/strategy.name).write_text(strategy.read_text())
+files.append(str(COPIES/strategy.name))
 args = ['swiftc','-D','UNIFYIME_CLI','-parse-as-library','-module-name','UnifyIMEIsolated','-target',f'{platform.machine()}-apple-macos13.0']
 for name in ['AppKit','Carbon','CoreML','InputMethodKit','WebKit']:
     args += ['-framework',name]
@@ -131,6 +144,12 @@ import json
 import os
 
 env=dict(os.environ,UNIFYIME_DISABLE_COREML_RANKER='1',UNIFYIME_DISABLE_COREML_LISTWISE_RANKER='1',UNIFYIME_RUNTIME_TRACE_ENABLED='0',UNIFYIME_SELECTION_LOG_ENABLED='0')
+strategy_result = subprocess.run([str(OUT/'UnifyIMEIsolated'), 'audit-strategy'], env=env, text=True, capture_output=True, timeout=120)
+(OUT/'strategy.log').write_text(strategy_result.stdout + strategy_result.stderr)
+assert strategy_result.returncode == 0, (strategy_result.stdout, strategy_result.stderr)
+print(strategy_result.stdout.strip())
+if options.strategy_only:
+    raise SystemExit(0)
 rows=[]
 for mode in ['left','right','both']:
     for paced in [False, True]:
@@ -187,6 +206,33 @@ for mode, accepted in [('disabled', []), ('left', [56]), ('right', [60]), ('all'
                 rows.append(dict(row_id=f'toggle-chord-{mode}-{code}-{modifier}', toggle_mode=mode,
                     keys=[down,f'flags:{modifier_code}:{flag}+{modifier}',f'flags:{modifier_code}:{flag}',up],
                     english_states=[False]*4))
+# 英文複數候選不可吃掉下一個中文音節的首鍵；同時驗證真正的複數仍保留。
+for word in ['automation', 'operation', 'application', 'project', 'system', 'model', 'test']:
+    for paced in [False, True]:
+        for prefix, surface in [('', ''), ('wu0fu4', '天氣 ')]:
+            rows.append(dict(row_id=f'boundary-{word}-{paced}-{bool(prefix)}', paced=paced,
+                keys=['raw:'+prefix+word+'s/6', 'enter'], expected=surface+word+' 能'))
+        rows.append(dict(row_id=f'plural-{word}-{paced}', paced=paced,
+            keys=['raw:'+word+'s', 'enter'], expected=word+'s'))
+# 人工選字之後追加／刪除其他內容，確認已選文字不被重新辨識覆蓋。
+for mode in ['left', 'right', 'both']:
+    for paced in [False, True]:
+        for action in ['enter', 'commit', 'deactivate', 'command-enter']:
+            rows.append(dict(row_id=f'selection-{mode}-{paced}-{action}', mode=mode, paced=paced,
+                keys=['raw:su3cl3', 'flush', 'choose-alternative', 'end', 'raw:wu0fu4', 'flush', 'backspace', action], preserve_selection=True))
+# 第一聲末音節在英文區段前，以完成音節的候選副本作整詞評估。
+for raw, text in [('zpvu', '分析'), ('ej/n', '公司'), ('wj/5', '通知')]:
+    for paced in [False, True]:
+        for prefix in ['', 'everybody']:
+            rows.append(dict(row_id=f'first-tone-{text}-{paced}-{bool(prefix)}', paced=paced,
+                keys=['raw:'+prefix+raw+'verygood', 'enter'], expected=('everybody ' if prefix else '')+text+' very good'))
+# 詞中尚未完成的音節必須留在插入點；刪除後恢復原詞與提交內容。
+for mode in ['left', 'right', 'both']:
+    for paced in [False, True]:
+        for cursor, pending in enumerate(['ㄒ你好', '你ㄒ好', '你好ㄒ']):
+            rows.append(dict(row_id=f'pending-insert-{mode}-{paced}-{cursor}', mode=mode, paced=paced,
+                keys=['raw:su3cl3', 'flush', 'home']+['right']*cursor+
+                    ['raw:v', 'flush', 'backspace', 'end', 'enter'], pending_expected=pending))
 (OUT/'native-matrix.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows))
 r=subprocess.run([str(OUT/'UnifyIMEIsolated'),'audit-native'],env=env,text=True,input=(OUT/'native-matrix.jsonl').read_text(),capture_output=True,timeout=600)
 (OUT/'native-matrix-results.jsonl').write_text(r.stdout)
@@ -202,8 +248,16 @@ for row in rows:
         after_backspace=next(s for s in states if s['action']=='backspace')
         after_esc=next(s for s in states if s['action']=='esc')
         passed=flushes[-1]['readings']==inserted and after_backspace['readings']==['ㄋㄧˇ','ㄏㄠˇ'] and after_esc['readings']==inserted and not last['has_composition']
+    elif row.get('pending_expected'):
+        pending = [s for s in states if s['action'] == 'flush'][-1]
+        restored = next(s for s in states if s['action'] == 'backspace')
+        passed = (pending['text'] == row['pending_expected'] and pending['pending'] == 'ㄒ'
+                  and restored['text'] == '你好' and last['committed'] == '你好' and not last['has_composition'])
     elif row.get('expected'):
         passed=last['committed']==row['expected'] and not last['has_composition']
+    elif row.get('preserve_selection'):
+        chosen = next(state for state in states if state['action'] == 'choose-alternative')
+        passed = chosen['handled'] and bool(chosen['chosen']) and chosen['locks'] > 0 and last['committed'] == chosen['text'] + '天' and not last['has_composition']
     elif 'english_states' in row:
         passed=True
     else:

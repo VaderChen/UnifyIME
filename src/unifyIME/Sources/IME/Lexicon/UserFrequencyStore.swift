@@ -6,9 +6,11 @@ import Foundation
 /// English is skipped — call `record`/`boost` only for non-English targets.
 enum UserFrequencyStore {
     private static let lock = NSLock()
+    private static let persistenceLock = NSLock()
     /// languageID → (reading → [(surface, count)])
     private static var cache: [String: [String: [(surface: String, count: Int)]]] = [:]
     private static var dirty: Set<String> = []
+    private static var revisions: [String: UInt64] = [:]
     private static var pendingFlush: DispatchWorkItem?
 
     // MARK: - Public API
@@ -28,8 +30,9 @@ enum UserFrequencyStore {
         langMap[key] = entries
         cache[languageID] = langMap
         dirty.insert(languageID)
+        revisions[languageID, default: 0] &+= 1
+        scheduleFlushLocked()
         lock.unlock()
-        scheduleFlush()
     }
 
     /// Return user frequency score for a candidate. Higher = user picks this more often.
@@ -101,19 +104,20 @@ enum UserFrequencyStore {
         return result
     }
 
-    private static func saveToDisk(languageID: String, data: [String: [(surface: String, count: Int)]]) {
+    private static func saveToDisk(languageID: String, data: [String: [(surface: String, count: Int)]]) throws {
         let url = fileURL(for: languageID)
-        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var lines: [String] = []
         for (reading, entries) in data.sorted(by: { $0.key < $1.key }) {
             for entry in entries.sorted(by: { $0.count > $1.count }) {
                 lines.append("\(reading)\t\(entry.surface)\t\(entry.count)")
             }
         }
-        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        try lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private static func scheduleFlush() {
+    /// 必須持有 lock，包含延遲工作項目的取消與替換。
+    private static func scheduleFlushLocked() {
         pendingFlush?.cancel()
         let item = DispatchWorkItem {
             flush()
@@ -123,14 +127,28 @@ enum UserFrequencyStore {
     }
 
     static func flush() {
+        // 序列化快照與寫入，避免較舊的 flush 最後完成、覆蓋較新的詞頻。
+        persistenceLock.lock()
+        defer { persistenceLock.unlock() }
         lock.lock()
+        pendingFlush?.cancel()
+        pendingFlush = nil
         let toFlush = dirty
         let snapshot = cache
-        dirty.removeAll()
+        let savedRevisions = revisions
         lock.unlock()
         for langID in toFlush {
-            if let data = snapshot[langID] {
-                saveToDisk(languageID: langID, data: data)
+            guard let data = snapshot[langID] else { continue }
+            do {
+                try saveToDisk(languageID: langID, data: data)
+                lock.lock()
+                // 寫入期間仍允許選字；新記錄必須留待下一次保存。
+                if revisions[langID] == savedRevisions[langID] {
+                    dirty.remove(langID)
+                }
+                lock.unlock()
+            } catch {
+                // 保存失敗保留 dirty，後續 flush 可重試，不丟棄學習結果。
             }
         }
     }

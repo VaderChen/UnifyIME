@@ -559,24 +559,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         replacingRange range: Range<Int>,
         to state: inout UnifiedCompositionState
     ) {
-        let survivingLockedKeys = state.explicitLockedKeys.filter { key in
-            let keyRange = key.start..<(key.start + key.length)
-            return keyRange.upperBound <= range.lowerBound || keyRange.lowerBound >= range.upperBound
-        }
-        state.explicitLockedKeys = survivingLockedKeys
-        state.automaticLockedKeys = state.automaticLockedKeys.filter { key in
-            key.start + key.length <= range.lowerBound || key.start >= range.upperBound
-        }
-        state.segmentOverrides = state.segmentOverrides.filter { key, _ in
-            let keyRange = key.start..<(key.start + key.length)
-            return keyRange.upperBound <= range.lowerBound || keyRange.lowerBound >= range.upperBound
-        }
-
-        for segment in previewSegments {
-            let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
-            state.segmentOverrides[key] = segment.value
-            state.explicitLockedKeys.insert(key)
-        }
+        state.confirmSegments(previewSegments, replacing: range)
     }
 
     private func setSelectedCandidateIndexDirectly(_ newValue: Int) {

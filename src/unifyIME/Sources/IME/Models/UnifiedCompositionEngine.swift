@@ -54,6 +54,21 @@ struct UnifiedCompositionState {
         automaticLockedKeys = []
     }
 
+    /// 確認新的選字範圍時，一併替換交疊的舊鎖定，避免舊整詞蓋過新單字。
+    mutating func confirmSegments(_ segments: [ComposedSegment], replacing range: Range<Int>) {
+        func isOutside(_ key: CompositionSegmentKey) -> Bool {
+            key.start + key.length <= range.lowerBound || key.start >= range.upperBound
+        }
+        explicitLockedKeys = explicitLockedKeys.filter(isOutside)
+        automaticLockedKeys = automaticLockedKeys.filter(isOutside)
+        segmentOverrides = segmentOverrides.filter { isOutside($0.key) }
+        for segment in segments {
+            let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
+            segmentOverrides[key] = segment.value
+            explicitLockedKeys.insert(key)
+        }
+    }
+
     func attachSources(to presentation: CompositionPresentationState) -> CompositionPresentationState {
         func annotate(_ segment: ComposedSegment, preview: Bool = false) -> ComposedSegment {
             var result = segment
@@ -527,9 +542,11 @@ enum UnifiedCompositionEngine {
 
         let nextIdx = currentIdx + 1
         if nextIdx < segments.count {
-            // Advance cursor to end of the next segment so it becomes the new focused segment.
+            // 游標靠右時以詞段起點取得焦點；靠左／雙側以詞段尾端取得。
+            // 固定放在尾端會讓靠右模式跳過下一詞。
             let nextSeg = segments[nextIdx]
-            state.compositionCursorIndex = nextSeg.start + nextSeg.length
+            state.compositionCursorIndex = currentCandidateCursorAlignment == .right
+                ? nextSeg.start : nextSeg.start + nextSeg.length
             state.selectedCandidateIndex = 0
             return false
         }
@@ -907,9 +924,16 @@ enum UnifiedCompositionEngine {
                            end < range.upperBound {
                             continue
                         }
-                        let signature = predictionSignature(for: state, targetID: target.id)
+                        // 已確定區段的右邊界時，以完成音節的副本評估整詞。
+                        // 逐鍵來源狀態保持不變，避免把第一聲末字的單字預覽
+                        // 誤當成整個詞的解碼結果。
+                        var candidateState = state
+                        if end == range.upperBound, !candidateState.currentReading.isEmpty {
+                            target.behavior.feed(token: "<space>", state: &candidateState)
+                        }
+                        let signature = predictionSignature(for: candidateState, targetID: target.id)
                         var text = predictedTextCache[signature] ?? {
-                            let prediction = target.behavior.predict(state)
+                            let prediction = target.behavior.predict(candidateState)
                             let displayed = displayText(for: prediction)
                             predictedTextCache[signature] = displayed
                             return displayed
