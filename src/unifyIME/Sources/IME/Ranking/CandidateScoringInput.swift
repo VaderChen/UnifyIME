@@ -5,6 +5,21 @@ struct CandidateScoringInput {
     let units: [CandidateUnit]
     let context: CandidateSelectionContext
 
+    static func make(matches: [LexiconStore.CompositionMatch], tokens: [InputToken], start: Int,
+                     length: Int, precedingValues: [String]) -> CandidateScoringInput? {
+        guard let input = make(candidates: matches.map(\.surface), tokens: tokens, start: start,
+                               length: length, precedingValues: precedingValues) else { return nil }
+        let units = zip(input.units, matches).map { unit, match -> CandidateUnit in
+            var result = unit
+            if match.inferredToneCount > 0 {
+                result.lexiconReading = match.reading
+                result.inferredToneCount = match.inferredToneCount
+            }
+            return result
+        }
+        return CandidateScoringInput(units: units, context: input.context)
+    }
+
     static func make(candidates: [String], tokens: [InputToken], start: Int,
                      length: Int, precedingValues: [String]) -> CandidateScoringInput? {
         guard length > 0, start >= 0, start <= tokens.count,

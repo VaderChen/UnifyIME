@@ -695,14 +695,12 @@ enum PhoneticIMECore {
         func entries(start: Int, length: Int) -> [CandidateEntry] {
             guard start >= 0, length > 0, start + length <= tokens.count else { return [] }
             let reading = tokens[start..<(start + length)].map(\.rawValue).joined()
-            let candidates = SessionCtl.resolveCandidates(for: reading).filter {
-                $0.count == length && LexiconStore.isDisplayableCandidate($0)
-            }
             let key = CompositionSegmentKey(start: start, length: length, reading: reading)
             let prefix = CandidateScoringInput.precedingValues(segments: walkedSegments, before: start)
-            return SessionCtl.rankCandidateSpan(candidates, tokens: tokens, start: start,
-                length: length, precedingValues: prefix, limit: visibleCandidateLimit).map {
-                CandidateEntry(text: $0, languageID: focus.languageID, replacementKey: key)
+            return SessionCtl.traditionalChineseProvider.readingWalker.rankedCandidates(
+                tokens, start: start, length: length, precedingValues: prefix, limit: visibleCandidateLimit
+            ).map {
+                CandidateEntry(text: $0.unit.surface, languageID: focus.languageID, replacementKey: key)
             }
         }
         var lists = [entries(start: focus.start, length: focus.length)]

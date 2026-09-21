@@ -14,6 +14,9 @@ struct CandidateUnit: Equatable {
     let spanLength: Int
     let providerScore: Double
     let baseRank: Int
+    // 省略聲調的整詞補救只影響詞庫證據，來源讀音與模型座標不變。
+    var lexiconReading: String? = nil
+    var inferredToneCount: Int = 0
 }
 
 enum CompositionConfirmation: String, Codable {

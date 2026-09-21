@@ -76,12 +76,19 @@ struct HeuristicCandidateRanker: UnifiedCandidateRanker {
         let usageBonus = count > 0 ? min(log2(Double(count) + 1.0) * 40.0, 400.0) : 0.0
         // 語料證據按涵蓋字數計入，避免每多切一個詞就多領固定獎勵。
         // 同音排序只在此計分，呼叫端不得再加使用紀錄或個人偏好。
-        let weight = Self.phraseStats.readingSurfaceWeights[unit.readingOrToken]?[unit.surface] ?? 0
+        let lexiconReading = unit.lexiconReading ?? unit.readingOrToken
+        let weight = Self.phraseStats.readingSurfaceWeights[lexiconReading]?[unit.surface] ?? 0
         let corpusBonus = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
             && unit.spanLength > 1 && weight.isFinite && weight > 0
             ? min(log10(weight + 1.0) * 120.0, 500.0) * Double(unit.spanLength) : 0.0
         let calibration = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
-            ? Self.spanCalibration[unit.readingOrToken]?[unit.spanLength] ?? 0 : 0
-        return corpusBonus + calibration + usageBonus + preference - rankPenalty
+            ? Self.spanCalibration[lexiconReading]?[unit.spanLength] ?? 0 : 0
+        // 每補出一個聲調均有成本，不能把近似整詞當成精確讀音命中。
+        let toneCost = Double(unit.inferredToneCount) * 120.0
+        // 補調另承擔低頻語料的不確定性；上界與分詞結合度相同，
+        // 隨觀察量增加而下降，避免少見詞只因結合度高便改掉正常單字。
+        let uncertainty = unit.inferredToneCount > 0
+            ? 500.0 * Double(max(0, unit.spanLength - 1)) / sqrt(max(0, weight) + 1.0) : 0.0
+        return corpusBonus + calibration + usageBonus + preference - rankPenalty - toneCost - uncertainty
     }
 }

@@ -48,6 +48,24 @@ struct LexiconStore {
         }
     }
     private let candidateCache = CandidateCache()
+    struct CompositionMatch {
+        let surface: String
+        let reading: String
+        let inferredToneCount: Int
+    }
+
+    private final class ToneCompletionIndex {
+        private let lock = NSLock()
+        private var index: [String: [String]]?
+
+        func readings(for base: String, build: () -> [String: [String]]) -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            if index == nil { index = build() }
+            return index?[base] ?? []
+        }
+    }
+    private let toneCompletionIndex = ToneCompletionIndex()
     let overrideCharacterMap: [String: [String]]
     let phraseCandidateMap: [String: [String]]
     let commonCharacterMap: [String: [String]]
@@ -139,6 +157,50 @@ struct LexiconStore {
         return PersonalVocabularyStore.candidates(reading: reading, base: base).filter {
             $0.count == syllableCount && Self.isDisplayableCandidate($0)
         }
+    }
+
+    /// 精確整詞不存在時，才補足未標聲調；不更改音節、明確聲調或單字查詢。
+    func compositionMatches(readings: [String], allowToneCompletion: Bool = true) -> [CompositionMatch] {
+        let reading = readings.joined()
+        let exact = compositionCandidates(reading: reading, syllableCount: readings.count)
+        if !exact.isEmpty {
+            return exact.map { CompositionMatch(surface: $0, reading: reading, inferredToneCount: 0) }
+        }
+        guard allowToneCompletion, (2...8).contains(readings.count),
+              readings.contains(where: { !containsToneMark($0) }),
+              readings.allSatisfy({ !$0.isEmpty && $0.unicodeScalars.allSatisfy {
+                  (0x3105...0x3129).contains($0.value) || Self.toneMarks.contains($0)
+              } }) else { return [] }
+        let bases = readings.map(normalizeReading)
+        let variants = toneCompletionIndex.readings(for: bases.joined()) {
+            var keys = Set<String>()
+            for map in [phraseCandidateMap, commonCharacterMap] {
+                for (key, values) in map where values.contains(where: {
+                    (2...8).contains($0.count) && $0.unicodeScalars.allSatisfy(HanCharacter.contains)
+                }) { keys.insert(key) }
+            }
+            return Dictionary(grouping: keys, by: normalizeReading).mapValues { $0.sorted() }
+        }
+        var matches: [CompositionMatch] = []
+        for variant in variants {
+            let syllables = SessionCtl.splitReadingIntoSyllables(variant)
+            guard syllables.count == readings.count,
+                  syllables.map(normalizeReading) == bases,
+                  zip(readings, syllables).allSatisfy({ !containsToneMark($0.0) || $0.0 == $0.1 }) else { continue }
+            let distance = zip(readings, syllables).filter { $0 != $1 }.count
+            guard distance > 0 else { continue }
+            for surface in compositionCandidates(reading: variant, syllableCount: readings.count) {
+                matches.append(CompositionMatch(surface: surface, reading: variant, inferredToneCount: distance))
+            }
+        }
+        // 先以最少補調數選擇同詞異讀；最終仍由共用詞頻及上下文評分決定。
+        matches.sort {
+            if $0.inferredToneCount != $1.inferredToneCount { return $0.inferredToneCount < $1.inferredToneCount }
+            if $0.reading != $1.reading { return $0.reading < $1.reading }
+            return $0.surface < $1.surface
+        }
+        var seen = Set<String>()
+        return matches.filter { seen.insert($0.surface).inserted }
     }
 
     func normalizeReading(_ reading: String) -> String {

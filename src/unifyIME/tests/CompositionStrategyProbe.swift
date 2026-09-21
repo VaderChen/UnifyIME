@@ -110,6 +110,43 @@ enum CompositionStrategyProbe {
             }
 
         }
+        if round == 0 || round == 6 {
+            let lexicon = SessionCtl.traditionalChineseProvider.lexicon
+            let readings = ["ㄑㄩ", "ㄒㄧㄠ"]
+            let matches = lexicon.compositionMatches(readings: readings)
+            check(matches.contains { $0.surface == "取消" && $0.reading == "ㄑㄩˇㄒㄧㄠ" && $0.inferredToneCount == 1 }, "補調：召回最少缺調的取消")
+            check(matches.contains { $0.surface == "取笑" && $0.inferredToneCount == 2 }, "補調：保留其他完整詞候選")
+            check(!lexicon.resolveCandidates(for: readings.joined()).contains("取消"), "補調：精確查詢不變成跨調查詢")
+            let protectedPhrase = UnifiedCompositionEngine.resolveWalk(["ㄕㄨ", "ㄖㄨˋ", "ㄈㄚˇ", "ㄊㄧㄝ", "ㄍㄟˇ", "ㄨㄛˇ"])
+            check(protectedPhrase.map(\.value).joined() == "輸入法貼給我", "補調：不跨過精確完整詞的邊界")
+            for (input, expected) in [
+                (["ㄕㄨ", "ㄖㄨˋ", "ㄈㄚˇ", "ㄊㄧㄝ", "ㄍㄟˇ", "ㄨㄛˇ"], "輸入法貼給我"),
+                (["ㄕˇ", "ㄩㄥˋ", "ㄑㄧㄢˊ", "ㄧㄠ", "ㄑㄩㄝˋ", "ㄖㄣˋ"], "使用前要確認")
+            ] {
+                let state = UnifiedCompositionState(readings: input)
+                check(UnifiedCompositionEngine.predict(state).presentation.markedText == expected,
+                    "補調：低頻詞不強迫合併正常單字（\(expected)）")
+            }
+            let scoring = CandidateScoringInput.make(matches: matches, tokens: readings.map { InputToken(languageID: "zh-Hant", rawValue: $0) }, start: 0, length: 2, precedingValues: [])!
+            check(scoring.units.allSatisfy { $0.readingOrToken == readings.joined() }, "補調：評分保留原始讀音供詞頻學習")
+            let heuristic = HeuristicCandidateRanker()
+            check(heuristic.scores(units: scoring.units, context: scoring.context) == scoring.units.map { heuristic.score(unit: $0, context: scoring.context) }, "補調：批次與逐筆評分一致")
+
+            check(!lexicon.compositionMatches(readings: ["ㄑㄩˋ", "ㄒㄧㄠ"]).contains { $0.surface == "取消" }, "補調：尊重明確聲調")
+            check(lexicon.compositionMatches(readings: ["ㄍㄨㄥ", "ㄙ"]).allSatisfy { $0.inferredToneCount == 0 }, "補調：已存在精確詞時不補調")
+            check(lexicon.compositionMatches(readings: ["ㄑㄩ"]).allSatisfy { $0.inferredToneCount == 0 }, "補調：不猜單字聲調")
+            for (input, expected) in [(readings, "取消"), (["ㄉㄧㄢ", "ㄋㄠ"], "電腦"), (["ㄒㄧㄣ", "ㄎㄨ"], "辛苦"), (["ㄑㄩ", "ㄒㄧㄠˋ"], "取笑"), (["ㄑㄩˇ", "ㄒㄧㄠ"], "取消")] {
+                var state = UnifiedCompositionState(readings: input)
+                let prediction = UnifiedCompositionEngine.predict(state)
+                check(prediction.presentation.markedText == expected, "補調：整詞組字（\(input.joined())）")
+                check(prediction.presentation.candidateEntries.contains { $0.text == expected }, "補調：組字與選字使用同一候選（\(expected)）")
+                check(UnifiedCompositionEngine.commitCandidate(index: 0, state: &state), "補調：確認整詞（\(expected)）")
+                check(state.allReadings == input && state.sourceInputs == input.map(UnifiedCompositionState.sourceInput(for:)), "補調：保留原讀音與原始鍵位（\(expected)）")
+            }
+            let key = CompositionSegmentKey(start: 0, length: 1, reading: "ㄑㄩ")
+            let state = UnifiedCompositionState(readings: readings, segmentOverrides: [key: "區"], explicitLockedKeys: [key])
+            check(UnifiedCompositionEngine.predict(state).presentation.markedText == "區消", "補調：人工選字不被補詞覆蓋")
+        }
         print("策略驗證：\(passed) 通過／\(failed) 失敗")
         if failed > 0 { exit(2) }
     }

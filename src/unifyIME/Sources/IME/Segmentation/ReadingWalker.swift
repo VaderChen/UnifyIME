@@ -21,15 +21,17 @@ struct ReadingWalker {
     }
 
     // 實際組字與離線評估共用候選資格及分詞邊分數。
-    func scoredEdges(_ tokens: [InputToken], start: Int, maxSpanLength: Int = 8) -> [ScoredEdge] {
+    func scoredEdges(_ tokens: [InputToken], start: Int, maxSpanLength: Int = 8,
+                     allowToneCompletion: Bool = true) -> [ScoredEdge] {
         guard tokens.indices.contains(start), maxSpanLength > 0 else { return [] }
         var edges: [ScoredEdge] = []
         var combined = ""
         for end in start..<min(tokens.count, start + min(maxSpanLength, 8)) {
             combined += tokens[end].rawValue
             let length = end - start + 1
-            let candidates = lexicon.compositionCandidates(reading: combined, syllableCount: length)
-            if candidates.isEmpty {
+            let matches = lexicon.compositionMatches(readings: tokens[start...end].map(\.rawValue),
+                                                     allowToneCompletion: allowToneCompletion)
+            if matches.isEmpty {
                 if length == 1 {
                     let recalled = lexicon.resolveCandidates(for: combined)
                     let segment = ComposedSegment(languageID: languageID, reading: combined,
@@ -38,7 +40,7 @@ struct ReadingWalker {
                 }
                 continue
             }
-            guard let input = CandidateScoringInput.make(candidates: candidates, tokens: tokens,
+            guard let input = CandidateScoringInput.make(matches: matches, tokens: tokens,
                 start: start, length: length, precedingValues: []) else { continue }
             let units = input.units
             let scores = pathRanker.scores(units: units, context: input.context)
@@ -60,32 +62,54 @@ struct ReadingWalker {
 
     func resolveWalk(_ tokens: [InputToken]) -> [ComposedSegment] {
         guard !tokens.isEmpty else { return [] }
-        var bestScores = Array(repeating: -Double.infinity, count: tokens.count + 1)
-        var bestCounts = Array(repeating: Int.max, count: tokens.count + 1)
-        bestCounts[tokens.count] = 0
-        var bestEdges: [ScoredEdge?] = Array(repeating: nil, count: tokens.count)
-        bestScores[tokens.count] = 0
-        for start in stride(from: tokens.count - 1, through: 0, by: -1) {
-            for edge in scoredEdges(tokens, start: start) {
-                let next = start + edge.segment.length
-                let score = edge.score + bestScores[next]
-                guard bestScores[next].isFinite else { continue }
-                let segmentCount = bestCounts[next] + 1
-                if score > bestScores[start] || (score == bestScores[start] && segmentCount < bestCounts[start]) {
-                    bestScores[start] = score
-                    bestCounts[start] = segmentCount
-                    bestEdges[start] = edge
-                }
-                if isRuntimeTraceEnabled {
-                    appendRuntimeTrace("lattice.edge range=\(start)..<\(next) reading=\(edge.segment.reading) value=\(edge.segment.value) local=\(edge.score) suffix=\(bestScores[next]) total=\(score)")
+        func path(in range: Range<Int>, allowToneCompletion: Bool) -> [ComposedSegment] {
+            var bestScores = Array(repeating: -Double.infinity, count: tokens.count + 1)
+            var bestCounts = Array(repeating: Int.max, count: tokens.count + 1)
+            bestCounts[range.upperBound] = 0
+            var bestEdges: [ScoredEdge?] = Array(repeating: nil, count: tokens.count)
+            bestScores[range.upperBound] = 0
+            for start in range.reversed() {
+                for edge in scoredEdges(tokens, start: start, maxSpanLength: range.upperBound - start,
+                                        allowToneCompletion: allowToneCompletion) {
+                    let next = start + edge.segment.length
+                    let score = edge.score + bestScores[next]
+                    guard bestScores[next].isFinite else { continue }
+                    let segmentCount = bestCounts[next] + 1
+                    if score > bestScores[start] || (score == bestScores[start] && segmentCount < bestCounts[start]) {
+                        bestScores[start] = score
+                        bestCounts[start] = segmentCount
+                        bestEdges[start] = edge
+                    }
+                    if isRuntimeTraceEnabled {
+                        appendRuntimeTrace("lattice.edge range=\(start)..<\(next) reading=\(edge.segment.reading) value=\(edge.segment.value) local=\(edge.score) suffix=\(bestScores[next]) total=\(score)")
+                    }
                 }
             }
+            var result: [ComposedSegment] = []
+            var cursor = range.lowerBound
+            while cursor < range.upperBound, let edge = bestEdges[cursor] {
+                result.append(edge.segment)
+                cursor += edge.segment.length
+            }
+            return result
         }
+        // 先保留精確分詞中的完整詞，補調僅限仍由單字組成的連續缺口。
+        // 避免補救候選跨過合法詞界，例如把既有三字詞的末字拆給下一詞。
+        let exact = path(in: 0..<tokens.count, allowToneCompletion: false)
         var result: [ComposedSegment] = []
-        var cursor = 0
-        while cursor < tokens.count, let edge = bestEdges[cursor] {
-            result.append(edge.segment)
-            cursor += edge.segment.length
+        var index = 0
+        while index < exact.count {
+            guard exact[index].length == 1 else {
+                result.append(exact[index]); index += 1; continue
+            }
+            let start = index
+            while index < exact.count && exact[index].length == 1 { index += 1 }
+            if index - start > 1 {
+                let range = exact[start].start..<(exact[index - 1].start + 1)
+                result.append(contentsOf: path(in: range, allowToneCompletion: true))
+            } else {
+                result.append(exact[start])
+            }
         }
         // 分詞完成後固定跨度；只在同讀音詞內以已選左文做有界 AI 排序。
         var contextual: [ComposedSegment] = []
@@ -116,9 +140,8 @@ struct ReadingWalker {
                       precedingValues: [String]) -> CandidateScoringInput? {
         guard start >= 0, length > 0, length <= 8, start <= tokens.count,
               length <= tokens.count - start else { return nil }
-        let reading = tokens[start..<(start + length)].map(\.rawValue).joined()
-        let candidates = lexicon.compositionCandidates(reading: reading, syllableCount: length)
-        return CandidateScoringInput.make(candidates: candidates, tokens: tokens,
+        let matches = lexicon.compositionMatches(readings: tokens[start..<(start + length)].map(\.rawValue))
+        return CandidateScoringInput.make(matches: matches, tokens: tokens,
             start: start, length: length, precedingValues: precedingValues)
     }
 

@@ -233,6 +233,24 @@ for mode in ['left', 'right', 'both']:
             rows.append(dict(row_id=f'pending-insert-{mode}-{paced}-{cursor}', mode=mode, paced=paced,
                 keys=['raw:su3cl3', 'flush', 'home']+['right']*cursor+
                     ['raw:v', 'flush', 'backspace', 'end', 'enter'], pending_expected=pending))
+# 省略聲調的整詞補救；空白音節完成需走真正 Space 鍵事件。
+for mode in ['left', 'right', 'both']:
+    for paced in [False, True]:
+        for raw, expected in [('fmvul', '取消'), ('fmvul4', '取笑'), ('fm3vul', '取消'),
+                              ('fm4vul', '去消'), ('2u0sl', '電腦'), ('vupdj', '辛苦')]:
+            rows.append(dict(row_id=f'tone-completion-{mode}-{paced}-{raw}', mode=mode, paced=paced,
+                keys=['raw:'+raw, 'enter'], expected=expected))
+        rows.append(dict(row_id=f'tone-spaces-{mode}-{paced}', mode=mode, paced=paced,
+            keys=['raw:fm', 'space', 'raw:vul', 'space', 'down', 'enter', 'enter'], expected='取消'))
+        rows.append(dict(row_id=f'tone-edit-{mode}-{paced}', mode=mode, paced=paced,
+            keys=['raw:fmvul', 'space', 'backspace', 'raw:vul', 'enter'], expected='取消'))
+        for action in ['commit', 'deactivate', 'command-enter']:
+            rows.append(dict(row_id=f'tone-commit-{mode}-{paced}-{action}', mode=mode, paced=paced,
+                keys=['raw:fmvul', action], expected='取消'))
+        for raw, expected in [('gjbj4z83wu,eo3ji3', '輸入法貼給我'),
+                              ('g3m/4fu06ulfm,4bp4', '使用前要確認')]:
+            rows.append(dict(row_id=f'tone-confidence-{mode}-{paced}-{raw}', mode=mode, paced=paced,
+                keys=['raw:' + raw, 'enter'], expected=expected))
 (OUT/'native-matrix.jsonl').write_text(''.join(json.dumps(r,ensure_ascii=False)+'\n' for r in rows))
 r=subprocess.run([str(OUT/'UnifyIMEIsolated'),'audit-native'],env=env,text=True,input=(OUT/'native-matrix.jsonl').read_text(),capture_output=True,timeout=600)
 (OUT/'native-matrix-results.jsonl').write_text(r.stdout)
