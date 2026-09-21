@@ -175,3 +175,15 @@ enum CompositionDeletionKey {
         }
     }
 }
+
+/// 詞庫寫入與候選顯示共用的漢字資格；包含擴充平面及相容漢字。
+enum HanCharacter {
+    static func contains(_ scalar: UnicodeScalar) -> Bool {
+        let value = scalar.value
+        let inHanBlock = (0x3400...0x4DBF).contains(value)
+            || (0x4E00...0x9FFF).contains(value) || (0xF900...0xFAFF).contains(value)
+            || (0x20000...0x2FFFF).contains(value) || (0x30000...0x3FFFF).contains(value)
+        return inHanBlock && scalar.properties.isIdeographic
+            && scalar.properties.generalCategory == .otherLetter
+    }
+}

@@ -72,7 +72,7 @@ enum PersonalVocabularyStore {
     static func validate(_ entry: Entry) throws {
         guard (1...8).contains(entry.syllables.count), entry.surface.count == entry.syllables.count,
               (-1000...1000).contains(entry.priority),
-              entry.surface.unicodeScalars.allSatisfy({ (0x3400...0x9FFF).contains($0.value) || (0x20000...0x323AF).contains($0.value) }),
+              entry.surface.unicodeScalars.allSatisfy(HanCharacter.contains),
               entry.syllables.allSatisfy({ $0.range(of: "^[ㄅ-ㄩ]{1,3}[ˊˇˋ˙]?$", options: .regularExpression) != nil }) else {
             throw failure("需提供 1–8 個中文字、逐字注音音節，priority 範圍 -1000 至 1000。一聲不加調號，其餘聲調置於音節尾端。")
         }

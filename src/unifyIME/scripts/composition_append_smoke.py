@@ -2,6 +2,7 @@
 """檢查逐鍵追加前後的組字文字及 Enter 提交；不將預期文字傳給解碼器。"""
 import argparse
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -11,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--cli', type=Path, default=ROOT / 'bin/cli/UnifyIMECLI')
+    parser.add_argument('--cli', type=Path, default=Path(os.environ.get('UNIFYIME_CLI_PATH', str(ROOT / 'bin/cli/UnifyIMECLI'))))
     args = parser.parse_args()
     cases = [json.loads(line) for line in (ROOT / 'src/unifyIME/tests/composition_append_cases.jsonl').read_text().splitlines() if line.strip()]
     requests = []

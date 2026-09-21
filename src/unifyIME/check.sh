@@ -25,13 +25,19 @@ if [[ ! " ${BUILD_ARGS[*]} " =~ " --no-deploy " && ! " ${BUILD_ARGS[*]} " =~ " -
   BUILD_ARGS+=(--no-deploy)
 fi
 
-"$ROOT/build.sh" "${BUILD_ARGS[@]}"
+zsh "$ROOT/build.sh" "${BUILD_ARGS[@]}"
 
 echo
 echo "[check] smoke: ranker-status"
 "$APP_BIN" ranker-status
 
 if [[ "$RUN_SELFTEST" == "1" ]]; then
+  echo "[check] 模型交易與資料契約 smoke"
+  python3 "$ROOT/scripts/maintenance_smoke.py"
+
+  echo "[check] 隔離原生事件 smoke"
+  python3 "$ROOT/scripts/native_event_smoke.py"
+
   echo
   echo "[check] continuous mixed-input smoke"
   python3 "$ROOT/scripts/mixed_live_smoke.py"

@@ -169,8 +169,8 @@ def main() -> int:
             if payload.get("error"):
                 failures.append((idx, category, sentence, str(payload["error"]), key_sequence))
                 continue
-            actual = str(payload.get("text", "")).replace("❚", "").strip()
-            if actual != sentence:
+            actual = str(payload.get("text", ""))
+            if actual != sentence or payload.get("has_composition") is not False:
                 failures.append((idx, category, sentence, actual, key_sequence))
                 continue
             category_passes[category] = category_passes.get(category, 0) + 1

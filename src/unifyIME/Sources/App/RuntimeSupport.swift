@@ -529,16 +529,34 @@ func publishDetailedProbeIfNeeded(route: String, input: String, composing: @auto
     publishIMEProbe(route: route, input: input, composing: composing(), candidateEntries: candidateEntries(), selectedIndex: selectedIndex, focusInfo: focusInfo, anchor: anchor)
 }
 
-// 中英文模式只作用於本輸入法；偏好只保存是否允許 Shift 切換。
+// 中英文模式只作用於本輸入法；偏好保存切換按鍵，沿用既有設定鍵以保持相容。
 var shiftEnglishInputActive = false
 enum ShiftLanguageToggleMode: String, CaseIterable {
-    case disabled, left, right, all
+    case disabled, left, right, all, leftAlt, rightAlt, leftControl, rightControl
     var title: String {
         switch self {
         case .disabled: return "關閉"
         case .left: return "左 SHIFT"
         case .right: return "右 SHIFT"
         case .all: return "全 SHIFT"
+        case .leftAlt: return "左 ALT"
+        case .rightAlt: return "右 ALT"
+        case .leftControl: return "左 CTRL"
+        case .rightControl: return "右 CTRL"
+        }
+    }
+    var modifierFlag: NSEvent.ModifierFlags {
+        switch self {
+        case .leftAlt, .rightAlt: return .option
+        case .leftControl, .rightControl: return .control
+        default: return .shift
+        }
+    }
+    var modifierKeyCodes: [UInt16] {
+        switch modifierFlag {
+        case .option: return [58, 61]
+        case .control: return [59, 62]
+        default: return [56, 60]
         }
     }
     func accepts(_ keyCode: UInt16) -> Bool {
@@ -547,6 +565,10 @@ enum ShiftLanguageToggleMode: String, CaseIterable {
         case .left: return keyCode == 56
         case .right: return keyCode == 60
         case .all: return keyCode == 56 || keyCode == 60
+        case .leftAlt: return keyCode == 58
+        case .rightAlt: return keyCode == 61
+        case .leftControl: return keyCode == 59
+        case .rightControl: return keyCode == 62
         }
     }
 }

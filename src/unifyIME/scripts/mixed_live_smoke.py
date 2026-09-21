@@ -146,10 +146,10 @@ def main() -> int:
             outputs[row_id] = payload
 
     failures = 0
-    for case_id, raw, expected, _ in CASES:
+    for case_id, raw, expected, should_commit in CASES:
         payload = outputs.get(case_id, {})
         actual = str(payload.get("text", ""))
-        if actual == expected:
+        if actual == expected and not payload.get("error") and payload.get("has_composition") is (not should_commit):
             print(f"PASS {case_id}: {actual}")
             continue
         failures += 1

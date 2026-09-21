@@ -12,6 +12,7 @@ extension SessionCtl {
     }
 
     struct RankerSample: Codable {
+        let feature_contract: String
         let sample_id: String
         let case_id: String
         let step_id: Int

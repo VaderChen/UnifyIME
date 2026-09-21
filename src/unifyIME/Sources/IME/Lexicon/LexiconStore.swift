@@ -149,11 +149,7 @@ struct LexiconStore {
     static func isDisplayableCandidate(_ candidate: String) -> Bool {
         guard !candidate.isEmpty else { return false }
         for scalar in candidate.unicodeScalars {
-            let value = scalar.value
-            let isCommonHan =
-                (0x3400...0x4DBF).contains(value) ||
-                (0x4E00...0x9FFF).contains(value)
-            if isCommonHan { continue }
+            if HanCharacter.contains(scalar) { continue }
             if allowedCandidatePunctuation.contains(scalar) { continue }
             return false
         }

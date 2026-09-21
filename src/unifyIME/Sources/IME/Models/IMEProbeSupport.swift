@@ -136,7 +136,6 @@ final class IMEProbeEngine {
     private func recomputeRawSpanMerge() {
         guard !rawInputBuffer.isEmpty else { return }
         guard rawInputBuffer.unicodeScalars.contains(where: { englishMergeTriggerSet.contains($0) }) else { return }
-        guard rawInputBuffer.count <= maxMixedRawBufferLength else { return }
         let primaryState = unifiedState()
         let primaryPrediction = unifiedPrediction()
         let resolution = MixedCompositionResolver.resolve(
@@ -718,6 +717,18 @@ private func imeProbePayload(for engine: IMEProbeEngine) -> [String: Any] {
     ]
 }
 
+/// 成功與錯誤列共用序列化，保留含引號、換行等字元的使用者 ID。
+@discardableResult
+private func emitProbeJSON(_ payload: [String: Any]) -> Bool {
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+          let json = String(data: data, encoding: .utf8) else {
+        fputs("error: probe JSON serialization failed\n", stderr)
+        return false
+    }
+    print(json)
+    return true
+}
+
 func imeActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
     guard !rows.isEmpty else {
         fputs("error: input JSONL contains no rows\n", stderr)
@@ -729,12 +740,12 @@ func imeActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
         guard let rowID = row["row_id"] as? String, !rowID.isEmpty,
               let tokens = row["row_keys"] as? [String], !tokens.isEmpty else {
             hadError = true
-            print("{\"row_id\":\"\(UUID().uuidString)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"row_id and non-empty row_keys are required\"}")
+            emitProbeJSON(["row_id": UUID().uuidString, "text": "", "readings": "", "has_composition": false, "error": "row_id and non-empty row_keys are required"])
             continue
         }
         if !seenIDs.insert(rowID).inserted {
             hadError = true
-            print("{\"row_id\":\"\(rowID)\",\"text\":\"\",\"readings\":\"\",\"has_composition\":false,\"error\":\"duplicate row_id\"}")
+            emitProbeJSON(["row_id": rowID, "text": "", "readings": "", "has_composition": false, "error": "duplicate row_id"])
             continue
         }
         let engine = IMEProbeEngine()
@@ -749,13 +760,7 @@ func imeActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
             hadError = true
             payload["error"] = "invalid action token: \(invalidToken)"
         }
-        guard let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
-              let json = String(data: data, encoding: .utf8) else {
-            hadError = true
-            print("{\"row_id\":\"\(rowID)\",\"error\":\"serialization failed\"}")
-            continue
-        }
-        print(json)
+        if !emitProbeJSON(payload) { hadError = true }
     }
     return hadError ? 2 : 0
 }
@@ -961,17 +966,17 @@ func englishActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
         guard let rowID = row["row_id"] as? String, !rowID.isEmpty,
               let tokens = row["row_keys"] as? [String], !tokens.isEmpty else {
             hadError = true
-            print("{\"row_id\":\"\(UUID().uuidString)\",\"error\":\"row_id and non-empty row_keys are required\"}")
+            emitProbeJSON(["row_id": UUID().uuidString, "text": "", "readings": "", "has_composition": false, "error": "row_id and non-empty row_keys are required"])
             continue
         }
         guard seenIDs.insert(rowID).inserted else {
             hadError = true
-            print("{\"row_id\":\"\(rowID)\",\"error\":\"duplicate row_id\"}")
+            emitProbeJSON(["row_id": rowID, "text": "", "readings": "", "has_composition": false, "error": "duplicate row_id"])
             continue
         }
         guard let engine = EnglishActionProbeEngine() else {
             hadError = true
-            print("{\"row_id\":\"\(rowID)\",\"error\":\"english target missing\"}")
+            emitProbeJSON(["row_id": rowID, "text": "", "readings": "", "has_composition": false, "error": "english target missing"])
             continue
         }
         var invalidToken: String?
@@ -981,7 +986,7 @@ func englishActionBatchProbe(_ rows: [[String: Any]]) -> Int32 {
         }
         var payload: [String: Any] = ["row_id": rowID, "text": engine.assertionText, "readings": engine.assertionReadings, "has_composition": engine.assertionHasComposition]
         if let invalidToken { hadError = true; payload["error"] = "invalid action token: \(invalidToken)" }
-        if let data = try? JSONSerialization.data(withJSONObject: payload, options: []), let json = String(data: data, encoding: .utf8) { print(json) } else { hadError = true; print("{\"row_id\":\"\(rowID)\",\"error\":\"serialization failed\"}") }
+        if !emitProbeJSON(payload) { hadError = true }
     }
     return hadError ? 2 : 0
 }

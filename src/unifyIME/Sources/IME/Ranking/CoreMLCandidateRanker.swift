@@ -5,7 +5,6 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     private let fallback = HeuristicCandidateRanker()
     private let encoder = RankingFeatureEncoder()
     private let predictionCache = CandidatePredictionCache()
-    private let listwiseRanker = CoreMLListwiseCandidateRanker()
     private let model: MLModel?
     private let resolvedModelPath: String?
     private let resolvedComputeUnits: MLComputeUnits?
@@ -16,7 +15,8 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     private let featureContractDescription: String
     let isModelLoaded: Bool
 
-    var isListwiseRerankingAvailable: Bool { listwiseRanker.isModelLoaded }
+    // Listwise 分數依賴候選集合，尚未符合共用句子評分契約；保留離線實驗程式。
+    var isListwiseRerankingAvailable: Bool { false }
 
     init(modelName: String = "CandidateRanker") {
         let env = ProcessInfo.processInfo.environment
@@ -186,8 +186,11 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             "compute_units=\(resolvedComputeUnits.map(Self.computeUnitDescription(for:)) ?? "n/a")",
             "input_shape=\(resolvedInputShape.map(\.intValue))",
             "output=\(resolvedOutputDescription)",
-            "feature_contract=\(featureContractDescription)"
-        ] + [listwiseRanker.debugStatus()]).joined(separator: "\n")
+            "feature_contract=\(featureContractDescription)",
+            "listwise_model_loaded=false",
+            "listwise_runtime_enabled=false",
+            "listwise_status=disabled_pending_sentence_scoring_contract"
+        ]).joined(separator: "\n")
     }
 
     private static func makeModelConfiguration() -> MLModelConfiguration {

@@ -35,6 +35,11 @@ enum MixedCompositionResolver {
         primaryState: UnifiedCompositionState,
         primarySegments: [ComposedSegment]
     ) -> MixedCompositionResolution {
+        if rawBuffer.count > maxMixedRawBufferLength {
+            return resolveLongComposition(rawBuffer: rawBuffer, primaryTargetID: primaryTargetID,
+                primaryLanguageID: primaryLanguageID, primaryBehavior: primaryBehavior,
+                primaryState: primaryState)
+        }
         let window = sourceWindow(state: primaryState, rawBuffer: rawBuffer, behavior: primaryBehavior)
         let exactFullEnglishCandidate = EnglishIMEEngine.exactSurfaceCandidates(for: rawBuffer).first
         let hasExactFullEnglishMatch = exactFullEnglishCandidate != nil
@@ -158,7 +163,7 @@ enum MixedCompositionResolver {
             return MixedCompositionResolution(analysis: analysis, materializedState: nil)
         }
         var state = window.state
-        state.invalidateAutomaticDecisions()
+        // rebaseOverrides 只失效交錯範圍；視窗外已解析的英文必須保留。
         state.readings = state.allReadings
         state.trailingReadings = []
         state.rebaseOverrides(replacing: window.range, insertedCount: replacement.readings.count,
@@ -172,6 +177,121 @@ enum MixedCompositionResolver {
         }
         state.compositionCursorIndex = window.range.lowerBound + replacement.readings.count
         state.rawReadingSymbols = state.readings.joined().map(String.init)
+        return MixedCompositionResolution(analysis: analysis, materializedState: state)
+    }
+
+    /// 長組字仍逐段使用相同解析器。每段最多 120 鍵，優先在音節結束處
+    /// 分段，不因整句長度停用英文；最後一段保留尚未完成的音節。
+    private static func resolveLongComposition(rawBuffer: String, primaryTargetID: String,
+        primaryLanguageID: String, primaryBehavior: CompositionLanguageBehavior,
+        primaryState: UnifiedCompositionState) -> MixedCompositionResolution {
+        let empty = MixedMergeAnalysis(merge: RawSpanMergeResult(coverages: [], mergedText: "",
+            coveredRawLength: 0, fullCoverage: false), detectedEnglishCandidates: [])
+        guard let window = sourceWindow(state: primaryState, rawBuffer: rawBuffer, behavior: primaryBehavior),
+              !window.state.explicitLockedKeys.contains(where: {
+                  $0.start < window.range.upperBound && window.range.lowerBound < $0.start + $0.length
+              }) else { return MixedCompositionResolution(analysis: empty, materializedState: nil) }
+        let characters = Array(rawBuffer)
+        var offset = 0
+        var replacement = UnifiedCompositionState()
+        var coverages: [RawSpanCoverage] = []
+        var detected: [(rawStart: Int, rawEnd: Int, text: String)] = []
+        var applied = false
+        var previousTargetID: String?
+        // 使用實際來源音節邊界，避免切斷多鍵注音；分隔鍵可避免切開英文詞。
+        var sourceBoundaries = Set<Int>()
+        var sourceOffset = 0
+        for source in window.state.sourceInputs[window.range] {
+            sourceOffset += source.count
+            sourceBoundaries.insert(sourceOffset)
+        }
+        while offset < characters.count {
+            let limit = min(offset + maxMixedRawBufferLength, characters.count)
+            var end = limit
+            if limit < characters.count {
+                let boundaries = sourceBoundaries.filter { $0 > offset && $0 <= limit }
+                let separated = boundaries.filter {
+                    $0 >= offset + maxMixedRawBufferLength / 2 && !characters[$0 - 1].isLetter
+                }
+                // 沒有聲調／分隔鍵的長英文串，改在已完整辨識的詞尾分段。
+                // 保留視窗末端作下一段，避免把可延伸的英文前綴當成完整詞尾。
+                let prefix = String(characters[offset..<limit])
+                let englishEnd = separated.isEmpty ? strongestExactEnglishCoverages(in: prefix).filter {
+                    $0.end >= maxMixedRawBufferLength / 2 && $0.end < prefix.count
+                        && !EnglishIMEEngine.exactSurfaceCandidates(
+                            for: String(characters[(offset + $0.start)..<(offset + $0.end)])).isEmpty
+                }.map { offset + $0.end }.max() : nil
+                end = separated.max() ?? englishEnd ?? boundaries.max() ?? limit
+            }
+            let chunk = String(characters[offset..<end])
+            var local = UnifiedCompositionState()
+            primaryBehavior.feed(token: chunk, state: &local)
+            let result = resolve(rawBuffer: chunk, primaryTargetID: primaryTargetID,
+                primaryLanguageID: primaryLanguageID, primaryBehavior: primaryBehavior,
+                primaryState: local,
+                primarySegments: UnifiedCompositionEngine.predict(local).presentation.displayedSegments)
+            if let resolved = result.materializedState {
+                local = resolved
+                applied = true
+            }
+            if end < characters.count, !local.currentReading.isEmpty {
+                primaryBehavior.feed(token: "<space>", state: &local)
+            }
+            let firstTarget = result.materializedState == nil ? primaryTargetID
+                : (result.analysis.merge.coverages.first?.targetID ?? primaryTargetID)
+            if let previousTargetID, previousTargetID != primaryTargetID || firstTarget != primaryTargetID {
+                let key = CompositionSegmentKey(start: replacement.readings.count, length: 1, reading: " ")
+                replacement.readings.append(" ")
+                replacement.readingRawInputs.append("")
+                replacement.segmentOverrides[key] = " "
+                replacement.automaticLockedKeys.insert(key)
+            }
+            previousTargetID = result.materializedState == nil ? primaryTargetID
+                : (result.analysis.merge.coverages.last?.targetID ?? primaryTargetID)
+            let start = replacement.readings.count
+            replacement.readingRawInputs += local.sourceInputs
+            replacement.readings += local.allReadings
+            replacement.currentReading = local.currentReading
+            replacement.pendingRawInput = local.pendingRawInput
+            for (key, value) in local.segmentOverrides {
+                let shifted = CompositionSegmentKey(start: start + key.start, length: key.length, reading: key.reading)
+                replacement.segmentOverrides[shifted] = value
+                if local.automaticLockedKeys.contains(key) { replacement.automaticLockedKeys.insert(shifted) }
+            }
+            coverages += result.analysis.merge.coverages.map {
+                RawSpanCoverage(targetID: $0.targetID, start: offset + $0.start, end: offset + $0.end,
+                    text: $0.text, score: $0.score)
+            }
+            detected += result.analysis.detectedEnglishCandidates.map { (offset + $0.rawStart, offset + $0.rawEnd, $0.text) }
+            offset = end
+        }
+        let analysis = MixedMergeAnalysis(merge: RawSpanMergeResult(coverages: coverages,
+            mergedText: coverages.map(\.text).joined(), coveredRawLength: coverages.reduce(0) { $0 + $1.end - $1.start },
+            fullCoverage: coverages.reduce(0) { $0 + $1.end - $1.start } == rawBuffer.count),
+            detectedEnglishCandidates: detected)
+        guard applied, replacement.sourceInputs.joined() + replacement.pendingRawInput == rawBuffer else {
+            return MixedCompositionResolution(analysis: analysis, materializedState: nil)
+        }
+        var state = window.state
+        state.readings = state.allReadings
+        state.trailingReadings = []
+        state.rebaseOverrides(replacing: window.range, insertedCount: replacement.readings.count,
+            insertedRawInputs: replacement.sourceInputs)
+        state.readings.replaceSubrange(window.range, with: replacement.readings)
+        for (key, value) in replacement.segmentOverrides {
+            let shifted = CompositionSegmentKey(start: window.range.lowerBound + key.start, length: key.length, reading: key.reading)
+            state.segmentOverrides[shifted] = value
+            if replacement.automaticLockedKeys.contains(key) { state.automaticLockedKeys.insert(shifted) }
+        }
+        let cursor = window.range.lowerBound + replacement.readings.count
+        state.compositionCursorIndex = cursor
+        state.currentReading = replacement.currentReading
+        state.pendingRawInput = replacement.pendingRawInput
+        if !state.currentReading.isEmpty {
+            state.trailingReadings = Array(state.readings.dropFirst(cursor))
+            state.readings = Array(state.readings.prefix(cursor))
+        }
+        state.rawReadingSymbols = (state.allReadings.joined() + state.currentReading).map(String.init)
         return MixedCompositionResolution(analysis: analysis, materializedState: state)
     }
 

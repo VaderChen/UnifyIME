@@ -88,7 +88,7 @@ final class PreferencesWindowController: NSWindowController, NSWindowDelegate, W
                 }
                 updateStatus = "正在下載並驗證更新…"
                 publishState()
-                let installer = try await ReleaseUpdater.prepare(update) { [weak self] fraction, status in
+                let installer = try await ReleaseUpdater.prepare(update) { [weak self = self] fraction, status in
                     Task { @MainActor in
                         guard let self, self.updateBusy else { return }
                         self.updateProgress = fraction

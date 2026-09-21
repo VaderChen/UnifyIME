@@ -40,31 +40,37 @@ extension SessionCtl {
                 let spanLength = spanTokens.count
                 guard spanLength > 0 else { continue }
 
-                let candidates = Array(resolveCandidates(for: segment.reading).prefix(max(1, topK)))
-                let precedingValues = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
-                let followingTokens = Array(allTokens.dropFirst(tokenCursor + spanLength))
-
-                for (candidateIndex, candidate) in candidates.enumerated() {
+                let tokens = allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+                let prefix = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
+                guard let input = traditionalChineseProvider.readingWalker.inputForSpan(tokens,
+                    start: tokenCursor, length: spanLength, precedingValues: prefix) else {
+                    tokenCursor += spanLength
+                    continue
+                }
+                let ranked = candidateRanker.ranked(units: input.units, context: input.context, limit: max(1, topK))
+                for (candidateIndex, item) in ranked.enumerated() {
+                    let candidate = item.unit.surface
                     let isPositive = candidate == segment.text
                     let isHardNegative = !isPositive && candidate.count == segment.text.count
                     let sample = RankerSample(
+                        feature_contract: CandidateFeatureContract.boundedSegmentsV2.rawValue,
                         sample_id: "case-\(caseIndex + 1)-seg-\(segmentIndex + 1)-cand-\(candidateIndex + 1)",
                         case_id: "case-\(caseIndex + 1)",
                         step_id: segmentIndex + 1,
                         source: source,
                         tags: tags,
                         language_id: traditionalChineseProvider.languageID,
-                        all_tokens: allTokens,
+                        all_tokens: input.context.allTokens.map(\.rawValue),
                         combined_token: segment.reading,
                         focused_token: segment.reading,
-                        preceding_values: precedingValues,
-                        following_tokens: followingTokens,
+                        preceding_values: input.context.precedingValues,
+                        following_tokens: input.context.followingTokens.map(\.rawValue),
                         candidate_surface: candidate,
                         candidate_reading_or_token: segment.reading,
-                        span_start: tokenCursor,
+                        span_start: item.unit.spanStart,
                         span_length: spanLength,
-                        provider_score: Double(-candidateIndex),
-                        base_rank: candidateIndex,
+                        provider_score: item.unit.providerScore,
+                        base_rank: item.unit.baseRank,
                         label: isPositive ? 1.0 : 0.0,
                         sample_weight: isPositive ? 1.5 : (isHardNegative ? 1.25 : 1.0)
                     )
@@ -139,105 +145,36 @@ extension SessionCtl {
 
     private static func sentenceLocalScore(for segments: [ComposedSegment], allTokens: [String]) -> Double {
         guard !segments.isEmpty else { return 0.0 }
-        let ranker = datasetCandidateRanker
-        let phraseStats = LexiconStore.loadPhraseContextStats()
-        var total = 0.0
-        for (index, segment) in segments.enumerated() {
-            let precedingValues = Array(segments.prefix(index).map(\.value).suffix(3))
-            let followingTokens = Array(allTokens.dropFirst(segment.start + segment.length))
-            let candidates = Array(resolveCandidates(for: segment.reading).prefix(8))
-            let baseRank = max(0, candidates.firstIndex(of: segment.value) ?? visibleCandidateLimit)
-            let context = CandidateSelectionContext(
-                languageID: traditionalChineseProvider.languageID,
-                allTokens: allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                combinedToken: segment.reading,
-                spanLength: segment.length,
-                precedingValues: precedingValues,
-                followingTokens: followingTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                focusedToken: segment.reading
-            )
-            let unit = CandidateUnit(
-                languageID: traditionalChineseProvider.languageID,
-                surface: segment.value,
-                readingOrToken: segment.reading,
-                spanStart: segment.start,
-                spanLength: segment.length,
-                providerScore: Double(-baseRank),
-                baseRank: baseRank
-            )
-            let segmentationBonus = Double(max(0, segment.length - 1) * 1800)
-            let singleSyllablePenalty = segment.length == 1 ? 150.0 : 0.0
-            let frequencyWeight = phraseStats.surfaceWeights[segment.value] ?? 0.0
-            let frequencyBonus = frequencyWeight > 0 ? min(log10(frequencyWeight + 1.0) * 1200.0, 5000.0) : 0.0
-            let exactPhraseBonus = (segment.length > 1 && traditionalChineseProvider.lexicon.phraseCandidateMap[segment.reading]?.contains(segment.value) == true) ? 12000.0 : 0.0
-            total += ranker.score(unit: unit, context: context) + segmentationBonus + frequencyBonus + exactPhraseBonus - singleSyllablePenalty
-        }
-        return total
+        let tokens = allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+        return traditionalChineseProvider.readingWalker.scorePath(segments, tokens: tokens)
+            ?? -Double.greatestFiniteMagnitude
     }
 
     private static func enumerateSentenceBeamPaths(
         tokens: [String],
         beamWidth: Int,
         topCandidatesPerSpan: Int,
-        maxSpanLength: Int = 4
+        maxSpanLength: Int = 8
     ) -> [SentenceCandidatePath] {
-        guard !tokens.isEmpty else { return [] }
-        let ranker = datasetCandidateRanker
-        let phraseStats = LexiconStore.loadPhraseContextStats()
+        guard !tokens.isEmpty, maxSpanLength > 0, beamWidth > 0 else { return [] }
+        let inputTokens = tokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+        let walker = traditionalChineseProvider.readingWalker
         var beams: [Int: [SentenceBeamPath]] = [0: [SentenceBeamPath(segments: [], localScore: 0.0)]]
-
         for start in 0..<tokens.count {
             guard let currentBeam = beams[start], !currentBeam.isEmpty else { continue }
             var nextBuckets: [Int: [SentenceBeamPath]] = [:]
-
             for path in currentBeam {
-                var combined = ""
-                for end in start..<tokens.count {
-                    if end - start + 1 > maxSpanLength { break }
-                    combined += tokens[end]
-                    let spanLength = end - start + 1
-                    let candidates = Array(resolveCandidates(for: combined).prefix(max(1, topCandidatesPerSpan)))
-                    guard !candidates.isEmpty else { continue }
-                    let precedingValues = Array(path.segments.map(\.value).suffix(3))
-                    let followingTokens = end + 1 < tokens.count ? Array(tokens[(end + 1)...]) : []
-                    let context = CandidateSelectionContext(
-                        languageID: traditionalChineseProvider.languageID,
-                        allTokens: tokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                        combinedToken: combined,
-                        spanLength: spanLength,
-                        precedingValues: precedingValues,
-                        followingTokens: followingTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                        focusedToken: combined
-                    )
-                    let units = candidates.enumerated().map { rank, value in
-                        CandidateUnit(
-                            languageID: traditionalChineseProvider.languageID,
-                            surface: value,
-                            readingOrToken: combined,
-                            spanStart: start,
-                            spanLength: spanLength,
-                            providerScore: Double(-rank),
-                            baseRank: rank
-                        )
-                    }
-                    let rankerScores = ranker.scores(units: units, context: context)
-                    for rank in candidates.indices {
-                        let value = candidates[rank]
-                        let segmentationBonus = Double(max(0, spanLength - 1) * 1800)
-                        let singleSyllablePenalty = spanLength == 1 ? 150.0 : 0.0
-                        let frequencyWeight = phraseStats.surfaceWeights[value] ?? 0.0
-                        let frequencyBonus = frequencyWeight > 0 ? min(log10(frequencyWeight + 1.0) * 1200.0, 5000.0) : 0.0
-                        let exactPhraseBonus = (spanLength > 1 && traditionalChineseProvider.lexicon.phraseCandidateMap[combined]?.contains(value) == true) ? 12000.0 : 0.0
-                        let score = path.localScore + rankerScores[rank] + segmentationBonus + frequencyBonus + exactPhraseBonus - singleSyllablePenalty
-                        let segment = ComposedSegment(
-                            languageID: traditionalChineseProvider.languageID,
-                            reading: combined,
-                            value: value,
-                            start: start,
-                            length: spanLength
-                        )
-                        let next = SentenceBeamPath(segments: path.segments + [segment], localScore: score)
-                        nextBuckets[end + 1, default: []].append(next)
+                let prefix = CandidateScoringInput.precedingValues(segments: path.segments, before: start)
+                for length in 1...min(min(maxSpanLength, 8), tokens.count - start) {
+                    let ranked = walker.rankedCandidates(inputTokens, start: start, length: length,
+                        precedingValues: prefix, limit: max(1, topCandidatesPerSpan))
+                    for candidate in ranked {
+                        let segment = ComposedSegment(languageID: candidate.unit.languageID,
+                            reading: candidate.unit.readingOrToken, value: candidate.unit.surface,
+                            start: start, length: length)
+                        let next = SentenceBeamPath(segments: path.segments + [segment],
+                            localScore: path.localScore + candidate.score)
+                        nextBuckets[start + length, default: []].append(next)
                     }
                 }
             }
@@ -304,12 +241,11 @@ extension SessionCtl {
                 seen.insert(key)
 
                 let stepID = segment.start + 1
-                let precedingValues = candidate.segments
-                    .filter { $0.start + $0.length <= segment.start }
-                    .map(\.value)
-                let followingTokens = Array(allTokens.dropFirst(segment.start + segment.length))
-                let providerCandidates = Array(resolveCandidates(for: segment.reading).prefix(visibleCandidateLimit))
-                let baseRank = providerCandidates.firstIndex(of: segment.value) ?? visibleCandidateLimit
+                let tokens = allTokens.map { InputToken(languageID: segment.languageID, rawValue: $0) }
+                let prefix = CandidateScoringInput.precedingValues(segments: candidate.segments, before: segment.start)
+                guard let input = traditionalChineseProvider.readingWalker.inputForSpan(tokens,
+                    start: segment.start, length: segment.length, precedingValues: prefix),
+                      let unit = input.units.first(where: { $0.surface == segment.value }) else { continue }
                 let label = goldByStart[segment.start].map {
                     $0.length == segment.length && $0.reading == segment.reading && $0.value == segment.value
                 } == true ? 1.0 : 0.0
@@ -322,17 +258,17 @@ extension SessionCtl {
                         source: source,
                         tags: tags,
                         languageID: traditionalChineseProvider.languageID,
-                        allTokens: allTokens,
+                        allTokens: input.context.allTokens.map(\.rawValue),
                         combinedToken: segment.reading,
                         focusedToken: segment.reading,
-                        precedingValues: Array(precedingValues.suffix(3)),
-                        followingTokens: followingTokens,
+                        precedingValues: input.context.precedingValues,
+                        followingTokens: input.context.followingTokens.map(\.rawValue),
                         candidateSurface: segment.value,
                         candidateReadingOrToken: segment.reading,
-                        spanStart: segment.start,
+                        spanStart: unit.spanStart,
                         spanLength: segment.length,
-                        providerScore: Double(-baseRank),
-                        baseRank: baseRank,
+                        providerScore: unit.providerScore,
+                        baseRank: unit.baseRank,
                         label: label,
                         sampleWeight: label > 0 ? 1.5 : 1.0
                     )
@@ -354,22 +290,24 @@ extension SessionCtl {
         let targetCount = max(4, topPaths)
 
         func isNaturalSentenceCandidate(_ path: SentenceCandidatePath) -> Bool {
-            guard !path.text.isEmpty else { return false }
+            guard !path.text.isEmpty, path.localScore.isFinite,
+                  path.localScore > -Double.greatestFiniteMagnitude else { return false }
             guard !path.segments.contains(where: { $0.value == $0.reading }) else { return false }
             let bopomofoScalars = CharacterSet(charactersIn: "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦˇˋˊ˙")
             return !path.text.unicodeScalars.contains(where: { bopomofoScalars.contains($0) })
         }
 
-        func replacementOptions(for segment: ComposedSegment, excluding value: String, limit: Int) -> [String] {
-            Array(
-                resolveCandidates(for: segment.reading)
-                    .filter { $0 != value && isDisplayableCandidate($0) }
-                    .prefix(max(1, limit))
-            )
+        let inputTokens = gold.readings.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+        func replacementOptions(for segment: ComposedSegment, in path: [ComposedSegment], excluding value: String, limit: Int) -> [String] {
+            let prefix = CandidateScoringInput.precedingValues(segments: path, before: segment.start)
+            return Array(traditionalChineseProvider.readingWalker.rankedCandidates(inputTokens,
+                start: segment.start, length: segment.length, precedingValues: prefix,
+                limit: max(1, limit) + 1).map(\.unit.surface)
+                .filter { $0 != value && isDisplayableCandidate($0) }.prefix(max(1, limit)))
         }
 
         for (index, segment) in segments.enumerated() {
-            let options = replacementOptions(for: segment, excluding: segment.value, limit: perSpanLimit)
+            let options = replacementOptions(for: segment, in: segments, excluding: segment.value, limit: perSpanLimit)
 
             for value in options {
                 var mutated = segments
@@ -388,27 +326,22 @@ extension SessionCtl {
             for firstIndex in 0..<(segments.count - 1) {
                 let firstOptions = replacementOptions(
                     for: segments[firstIndex],
+                    in: segments,
                     excluding: segments[firstIndex].value,
                     limit: 2
                 )
                 guard !firstOptions.isEmpty else { continue }
                 for secondIndex in (firstIndex + 1)..<segments.count {
-                    let secondOptions = replacementOptions(
-                        for: segments[secondIndex],
-                        excluding: segments[secondIndex].value,
-                        limit: 2
-                    )
-                    guard !secondOptions.isEmpty else { continue }
                     for firstValue in firstOptions {
+                        var prefixPath = segments
+                        prefixPath[firstIndex] = ComposedSegment(
+                            languageID: segments[firstIndex].languageID,
+                            reading: segments[firstIndex].reading, value: firstValue,
+                            start: segments[firstIndex].start, length: segments[firstIndex].length)
+                        let secondOptions = replacementOptions(for: prefixPath[secondIndex], in: prefixPath,
+                            excluding: prefixPath[secondIndex].value, limit: 2)
                         for secondValue in secondOptions {
-                            var mutated = segments
-                            mutated[firstIndex] = ComposedSegment(
-                                languageID: segments[firstIndex].languageID,
-                                reading: segments[firstIndex].reading,
-                                value: firstValue,
-                                start: segments[firstIndex].start,
-                                length: segments[firstIndex].length
-                            )
+                            var mutated = prefixPath
                             mutated[secondIndex] = ComposedSegment(
                                 languageID: segments[secondIndex].languageID,
                                 reading: segments[secondIndex].reading,
@@ -428,10 +361,10 @@ extension SessionCtl {
                 let lhs = segments[index]
                 let rhs = segments[index + 1]
                 let mergedReading = lhs.reading + rhs.reading
-                let mergedOptions = resolveCandidates(for: mergedReading)
-                    .filter { $0 != lhs.value + rhs.value }
-                    .filter(isDisplayableCandidate)
-                    .prefix(perSpanLimit)
+                let mergedSegment = ComposedSegment(languageID: lhs.languageID, reading: mergedReading,
+                    value: lhs.value + rhs.value, start: lhs.start, length: lhs.length + rhs.length)
+                let mergedOptions = replacementOptions(for: mergedSegment, in: segments,
+                    excluding: mergedSegment.value, limit: perSpanLimit)
                 for value in mergedOptions {
                     var mutated: [ComposedSegment] = Array(segments[..<index])
                     mutated.append(
@@ -473,12 +406,12 @@ extension SessionCtl {
             candidates.append(sentenceCandidatePath(segments: mutated, readings: gold.readings))
         }
 
-        if candidates.count < targetCount && gold.readings.count <= 8 {
+        if !gold.readings.isEmpty {
             let beamCandidates = enumerateSentenceBeamPaths(
                 tokens: gold.readings,
                 beamWidth: max(topPaths * 3, 16),
                 topCandidatesPerSpan: perSpanLimit,
-                maxSpanLength: 4
+                maxSpanLength: 8
             )
             candidates.append(contentsOf: beamCandidates.prefix(max(targetCount * 2, topPaths)))
         }
@@ -598,33 +531,16 @@ extension SessionCtl {
             let spanTokens = splitReadingIntoSyllables(segment.reading)
             let spanLength = spanTokens.count
             guard spanLength > 0 else { continue }
-            let candidates = Array(resolveCandidates(for: segment.reading).prefix(visibleCandidateLimit))
-            guard !candidates.isEmpty else {
+            let prefix = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
+            let tokens = allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
+            guard let input = traditionalChineseProvider.readingWalker.inputForSpan(tokens,
+                start: tokenCursor, length: spanLength, precedingValues: prefix), !input.units.isEmpty else {
                 tokenCursor += spanLength
                 continue
             }
-            let precedingValues = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
-            let followingTokens = Array(allTokens.dropFirst(tokenCursor + spanLength))
-            let context = CandidateSelectionContext(
-                languageID: traditionalChineseProvider.languageID,
-                allTokens: allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                combinedToken: segment.reading,
-                spanLength: spanLength,
-                precedingValues: precedingValues,
-                followingTokens: followingTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) },
-                focusedToken: segment.reading
-            )
-            let units = candidates.enumerated().map { index, value in
-                CandidateUnit(
-                    languageID: traditionalChineseProvider.languageID,
-                    surface: value,
-                    readingOrToken: segment.reading,
-                    spanStart: tokenCursor,
-                    spanLength: spanLength,
-                    providerScore: Double(-index),
-                    baseRank: index
-                )
-            }
+            let units = input.units
+            let context = input.context
+            let candidates = units.map(\.surface)
             let rankerScores = ranker.scores(units: units, context: context)
             let scored = zip(candidates, rankerScores).map { value, score in (value, score) }
             let ordered = scored.sorted { $0.1 > $1.1 }.map(\.0)

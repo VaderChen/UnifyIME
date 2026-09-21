@@ -191,26 +191,18 @@ python3 src/unifyIME/scripts/build_listwise_sentence_splits.py \
 Smoke 只證明擴充方向可行，不能直接部署；仍須完成 5-fold / 3-epoch、ANE Compute Plan、
 mixed/raw/web/長句延遲回歸後才能替換已安裝權重。
 
-## Runtime 策略
+## 執行階段狀態（2026-09-20）
 
-模型位置：
+目前正式排序器明確停用 Listwise，也不載入其模型。`ranker-status` 會回報
+`listwise_runtime_enabled=false` 及 `disabled_pending_sentence_scoring_contract`。
+僅放置模型檔或設定環境變數不會啟用；原本「已載入即可用」的回報並未對應實際推論。
 
-1. `UNIFYIME_LISTWISE_RANKER_MODEL_PATH`
-2. `~/Library/Application Support/UnifyIME/Models/ListwiseCandidateRanker.mlmodelc`
-3. `~/.fastchime/Models/ListwiseCandidateRanker.mlmodelc`
-4. app bundle `Contents/Resources/Models/ListwiseCandidateRanker.mlmodelc`
+`CoreMLListwiseCandidateRanker`、訓練與離線評估工具仍保留作實驗。
+重新接入前，必須定義候選集合如何穩定重建，讓候選視窗、ReadingWalker、整句路徑
+使用可比較的分數，並完成推論次數、準確率、長句延遲及 ANE 驗證。
+目前正式路徑沿用 scalar／heuristic 排序。
 
-控制項：
-
-- `UNIFYIME_DISABLE_COREML_LISTWISE_RANKER=1`
-- `UNIFYIME_LISTWISE_RESIDUAL_SCALE=0.5`
-
-為避免長句效能與錯誤自動替換：
-
-- 候選視窗：整組候選一次 listwise 推論。
-- ReadingWalker：heuristic 先完成動態分詞；只對最終 exact multi-syllable phrase 做 listwise。
-- 單字同音候選只顯示排序，不自動覆蓋 committed text。
-- residual prediction 有 2,048 組 LRU cache。
+以下 A/B 與部署紀錄是歷史實驗結果，不代表目前原始碼已啟用 Listwise。
 
 ## v1 Runtime A/B
 
@@ -230,6 +222,7 @@ mixed/raw/web/長句延遲回歸後才能替換已安裝權重。
 
 ## 部署狀態
 
-`listwise_ane_10m_v1` 已安裝於本機輸入法，並使用 notarized Developer ID bundle。
+歷史紀錄曾將 `listwise_ane_10m_v1` 安裝於本機輸入法，並使用 notarized Developer ID bundle。
+這不代表目前版本的正式排序會呼叫該模型；現行狀態以上述執行階段說明為準。
 模型仍是實驗性候選排序器；v3 開放文章擴充已通過 2-fold smoke，但完整 5-fold 與
 runtime/ANE 回歸尚未完成，因此目前不取代現行安裝權重。

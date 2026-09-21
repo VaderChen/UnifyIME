@@ -206,6 +206,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         rawReplayCacheOrder = []
         cachedRawInputBuffer = snapshot.cachedRawInputBuffer
         suppressCommitUntil = Date.distantPast
+        // 快照可能取自延後辨識之前；復原後重新排程，讓下一次提交仍能完成辨識。
+        if !mergedCompositionActive { scheduleMergeCheck() }
         if hasComposition {
             updateMarkedText(client)
         } else {
@@ -253,7 +255,6 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             guard !rawInputBuffer.isEmpty else { return }
             let shouldConsiderSecondaryMerge = rawInputBuffer.unicodeScalars.contains { englishMergeTriggerSet.contains($0) }
             guard shouldConsiderSecondaryMerge else { return }
-            guard rawInputBuffer.count <= maxMixedRawBufferLength else { return }
             let primaryPrediction = unifiedPrediction()
             let primarySegments = primaryPrediction.presentation.displayedSegments
             let resolution = MixedCompositionResolver.resolve(
@@ -351,6 +352,12 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         pendingRawReplayWorkItem?.cancel()
         pendingRawReplayWorkItem = nil
         rebuildTargetsFromRawInputBuffer()
+    }
+
+    /// 提交或改變編輯基準前，先完成同一批按鍵的重播與混打辨識。
+    private func completePendingRecognition() {
+        flushPendingRawReplay()
+        flushPendingMerge()
     }
 
     private func resetRawReplayState() {
@@ -850,7 +857,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     override func commitComposition(_ client: Any!) {
         traceState("commitComposition.entry")
         guard hasComposition else { return }
-        flushPendingRawReplay()
+        completePendingRecognition()
         lastRouteDebug = "commitComposition"
         publishDetailedProbeIfNeeded(route: lastRouteDebug, input: lastInputDebug, composing: composingBuffer, candidateEntries: Array(activeCandidateEntries.prefix(visibleCandidateLimit)), selectedIndex: selectedCandidateIndex)
         if Date() < suppressCommitUntil {
@@ -878,7 +885,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
 
         switch selector {
         case #selector(NSResponder.moveUp(_:)):
-            flushPendingRawReplay()
+            completePendingRecognition()
             if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
@@ -895,7 +902,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             updateMarkedText(client)
             return true
         case #selector(NSResponder.moveDown(_:)):
-            flushPendingRawReplay()
+            completePendingRecognition()
             if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
@@ -916,7 +923,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         case #selector(NSResponder.moveRight(_:)):
             return false
         case #selector(NSResponder.insertNewline(_:)):
-            flushPendingRawReplay()
+            completePendingRecognition()
             basicCandidateWindowRequested = false
             finalizePendingReadingForCommit()
             lastCommitReason = "didCommand(insertNewline:)"
@@ -924,7 +931,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return true
         case #selector(NSResponder.deleteForward(_:)):
             pushCompositionUndoSnapshot()
-            flushPendingRawReplay()
+            completePendingRecognition()
             basicCandidateWindowRequested = false
             handleDeleteForward()
             updateMarkedText(client)
@@ -949,13 +956,15 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         }
         if event.type == .flagsChanged {
             let flags = event.modifierFlags.intersection([.shift, .control, .option, .command, .capsLock, .function])
-            if shiftLanguageToggleEnabled,
+            let toggleMode = shiftLanguageToggleMode
+            if toggleMode != .disabled,
                shiftLanguageGesture.flagsChanged(keyCode: event.keyCode,
-                   shift: flags.contains(.shift), otherModifiers: !flags.subtracting(.shift).isEmpty),
-               shiftLanguageToggleMode.accepts(event.keyCode) {
+                   modifierActive: flags.contains(toggleMode.modifierFlag),
+                   otherModifiers: !flags.subtracting(toggleMode.modifierFlag).isEmpty,
+                   keyCodes: toggleMode.modifierKeyCodes),
+               toggleMode.accepts(event.keyCode) {
                 if hasComposition {
-                    flushPendingRawReplay()
-                    flushPendingMerge()
+                    completePendingRecognition()
                     finalizePendingReadingForCommit()
                     commitCurrentComposition(client, reason: "shiftLanguageToggle")
                 }
@@ -1012,7 +1021,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         if modifiers.contains(.capsLock),
            let chars = event.characters, !chars.isEmpty,
            chars.unicodeScalars.allSatisfy({ $0.isASCII && CharacterSet.alphanumerics.contains($0) }) {
-            clearComposition(client)
+            if hasComposition { commitCurrentComposition(client, reason: "capsLock") }
             if modifiers.contains(.shift) {
                 return false
             }
@@ -1024,7 +1033,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         if deletionKey == .forward {
             guard hasComposition else { return false }
             pushCompositionUndoSnapshot()
-            flushPendingRawReplay()
+            completePendingRecognition()
             basicCandidateWindowRequested = false
             handleDeleteForward()
             updateMarkedText(client)
@@ -1045,7 +1054,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         case 115, 119, 123, 124:
             if hasComposition {
                 // 先取得重播後狀態，避免移動時套回尚未更新的舊快照。
-                flushPendingRawReplay()
+                completePendingRecognition()
                 let keyCode = Int(event.keyCode)
                 func move(_ state: inout UnifiedCompositionState) -> Bool {
                     if keyCode == 115 || keyCode == 119 {
@@ -1073,8 +1082,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return false
         case 126:
             guard hasComposition else { return false }
-            flushPendingRawReplay()
-            flushPendingMerge()
+            completePendingRecognition()
             if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
@@ -1092,8 +1100,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return true
         case 125:
             guard hasComposition else { return false }
-            flushPendingRawReplay()
-            flushPendingMerge()
+            completePendingRecognition()
             if !currentReading.isEmpty { finalizePendingReadingForCommit() }
             guard !activeCandidates.isEmpty else { return true }
             pushCompositionUndoSnapshot()
@@ -1130,8 +1137,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
                 }
             } else {
                 // No pending reading → confirm current segment's top candidate and advance.
-                flushPendingRawReplay()
-                flushPendingMerge()
+                completePendingRecognition()
                 let confirmIndex = selectedCandidateIndex
                 let result = applyCandidateSelection(index: confirmIndex, advance: true)
                 if result == .confirmedAndReachedEnd {
@@ -1148,7 +1154,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
             return true
         case 36, 76:
             guard hasComposition else { return false }
-            flushPendingRawReplay()
+            completePendingRecognition()
             if basicCandidateWindowRequested && !activeCandidates.isEmpty {
                 pushCompositionUndoSnapshot()
                 let result = applyCandidateSelection(index: selectedCandidateIndex, advance: false)
@@ -1169,7 +1175,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         case 51:
             guard hasComposition else { return false }
             pushCompositionUndoSnapshot()
-            flushPendingRawReplay()
+            completePendingRecognition()
             basicCandidateWindowRequested = false
             traceState("backspace.before")
             // 中間輸入時 readings 只有左側前綴，右側仍保存在 trailingReadings。
@@ -1198,7 +1204,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         case 117:
             guard hasComposition else { return false }
             pushCompositionUndoSnapshot()
-            flushPendingRawReplay()
+            completePendingRecognition()
             basicCandidateWindowRequested = false
             handleDeleteForward()
             updateMarkedText(client)
@@ -1484,8 +1490,7 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     private func insertComposingSymbol(_ symbol: String, client: Any!) {
-        flushPendingRawReplay()
-        flushPendingMerge()
+        completePendingRecognition()
         pushCompositionUndoSnapshot()
         var state = unifiedState()
         SymbolCandidates.insert(symbol, state: &state)
@@ -1804,6 +1809,8 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
         guard hasComposition else { return }
         lastCommitReason = reason
         guard let input = client as? IMKTextInput else { return }
+        completePendingRecognition()
+        finalizePendingReadingForCommit()
         let snap = snapshot()
         let output = snap.markedText
         let replaceRange = currentMarkedRange(for: client)
