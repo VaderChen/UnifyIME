@@ -17,37 +17,23 @@ struct LexiconStore {
 
     private static let toneMarks = CharacterSet(charactersIn: "ˇˋˊ˙")
     private static let allowedCandidatePunctuation = CharacterSet(charactersIn: "，。、！？：；（）「」『』《》〈〉—…．·")
-    /// 快取跟隨不可變的詞庫實例；不同覆寫表不可共用讀音查詢結果。
-    private final class CandidateCache {
-        private let lock = NSLock()
-        private var values: [String: [String]] = [:]
-        private var order: [String] = []
-        private let capacity = 512
-
-        func lookup(_ reading: String) -> [String]? {
-            lock.lock()
-            defer { lock.unlock() }
-            guard let candidates = values[reading] else { return nil }
-            touch(reading)
-            return candidates
-        }
-
-        func store(_ candidates: [String], for reading: String) {
-            lock.lock()
-            defer { lock.unlock() }
-            values[reading] = candidates
-            touch(reading)
-            while order.count > capacity {
-                values.removeValue(forKey: order.removeFirst())
+    // 資源在程序生命週期內不變，共用底層資料；覆寫與查詢快取仍屬於各實例。
+    private static let sourceCommonCharacterMap = loadCommonCharacterMap()
+    private static let sourcePhraseCandidateMap = loadPhraseCandidateMap()
+    private static let sourceReadingPrefixes = loadReadingPrefixes(
+        phraseCandidateMap: sourcePhraseCandidateMap, commonCharacterMap: sourceCommonCharacterMap)
+    private static let phraseContextStats = readPhraseContextStats()
+    private static let sourceCharacterReadings: [Character: Set<String>] = {
+        var result: [Character: Set<String>] = [:]
+        for (reading, values) in sourceCommonCharacterMap {
+            for value in values where value.count == 1 && isDisplayableCandidate(value) {
+                result[value.first!, default: []].insert(reading)
             }
         }
-
-        private func touch(_ reading: String) {
-            order.removeAll { $0 == reading }
-            order.append(reading)
-        }
-    }
-    private let candidateCache = CandidateCache()
+        return result
+    }()
+    /// 不同覆寫表不可共用讀音查詢結果。
+    private let candidateCache = BoundedLRUCache<String, [String]>(capacity: 512)
     struct CompositionMatch {
         let surface: String
         let reading: String
@@ -108,22 +94,24 @@ struct LexiconStore {
     }
 
     init(overrideCharacterMap: [String: [String]]) {
-        phraseCandidateMap = Self.loadPhraseCandidateMap()
-        let sourceCommon = Self.loadCommonCharacterMap()
+        phraseCandidateMap = Self.sourcePhraseCandidateMap
+        let sourceCommon = Self.sourceCommonCharacterMap
         self.overrideCharacterMap = Self.validatedOverrides(overrideCharacterMap,
             common: sourceCommon, phrases: phraseCandidateMap)
         // 通過驗證後才合併，反查、前綴與中英辨識也只會看到合法配對。
         commonCharacterMap = self.overrideCharacterMap.reduce(into: sourceCommon) { result, entry in
             result[entry.key] = entry.value + (result[entry.key] ?? []).filter { !entry.value.contains($0) }
         }
-        readingPrefixes = Self.loadReadingPrefixes(
-            phraseCandidateMap: phraseCandidateMap,
-            commonCharacterMap: commonCharacterMap
-        )
+        var prefixes = Self.sourceReadingPrefixes
+        for reading in self.overrideCharacterMap.keys
+            where sourceCommon[reading] == nil && phraseCandidateMap[reading] == nil {
+            Self.insertProperPrefixes(of: reading, into: &prefixes)
+        }
+        readingPrefixes = prefixes
     }
 
     func resolveCandidates(for buffer: String) -> [String] {
-        if let cached = candidateCache.lookup(buffer) {
+        if let cached = candidateCache.value(for: buffer) {
             return PersonalVocabularyStore.candidates(reading: buffer, base: cached)
         }
 
@@ -184,11 +172,18 @@ struct LexiconStore {
         var matches: [CompositionMatch] = []
         for variant in variants {
             let syllables = SessionCtl.splitReadingIntoSyllables(variant)
-            guard syllables.count == readings.count,
-                  syllables.map(normalizeReading) == bases,
-                  zip(readings, syllables).allSatisfy({ !containsToneMark($0.0) || $0.0 == $0.1 }) else { continue }
-            let distance = zip(readings, syllables).filter { $0 != $1 }.count
-            guard distance > 0 else { continue }
+            guard syllables.count == readings.count else { continue }
+            var distance = 0
+            var compatible = true
+            for index in readings.indices {
+                guard normalizeReading(syllables[index]) == bases[index],
+                      !containsToneMark(readings[index]) || readings[index] == syllables[index] else {
+                    compatible = false
+                    break
+                }
+                if readings[index] != syllables[index] { distance += 1 }
+            }
+            guard compatible, distance > 0 else { continue }
             for surface in compositionCandidates(reading: variant, syllableCount: readings.count) {
                 matches.append(CompositionMatch(surface: surface, reading: variant, inferredToneCount: distance))
             }
@@ -204,7 +199,11 @@ struct LexiconStore {
     }
 
     func normalizeReading(_ reading: String) -> String {
-        reading.unicodeScalars.filter { !Self.toneMarks.contains($0) }.map(String.init).joined()
+        var scalars = String.UnicodeScalarView()
+        for scalar in reading.unicodeScalars where !Self.toneMarks.contains(scalar) {
+            scalars.append(scalar)
+        }
+        return String(scalars)
     }
 
     func containsToneMark(_ reading: String) -> Bool {
@@ -235,11 +234,9 @@ struct LexiconStore {
                 let key = String(parts[0])
                 let value = String(parts[1])
                 if !key.isEmpty, !value.isEmpty {
-                    var list = result[key, default: []]
-                    if !list.contains(value) {
-                        list.append(value)
+                    if result[key]?.contains(value) != true {
+                        result[key, default: []].append(value)
                     }
-                    result[key] = list
                 }
             }
         }
@@ -249,17 +246,13 @@ struct LexiconStore {
     /// 覆寫只能調整合法讀音的來源順位，不得建立去調或錯配別名。
     /// 新短語可依每個字的正式讀音組成；整詞讀音優先保留詞庫中的異讀與變調。
     static func validatedOverrides(_ overrides: [String: [String]]) -> [String: [String]] {
-        validatedOverrides(overrides, common: loadCommonCharacterMap(), phrases: loadPhraseCandidateMap())
+        validatedOverrides(overrides, common: sourceCommonCharacterMap, phrases: sourcePhraseCandidateMap)
     }
 
     private static func validatedOverrides(_ overrides: [String: [String]],
         common: [String: [String]], phrases: [String: [String]]) -> [String: [String]] {
-        var characterReadings: [Character: Set<String>] = [:]
-        for (reading, values) in common {
-            for value in values where value.count == 1 && isDisplayableCandidate(value) {
-                characterReadings[value.first!, default: []].insert(reading)
-            }
-        }
+        guard !overrides.isEmpty else { return [:] }
+        let characterReadings = sourceCharacterReadings
         return overrides.reduce(into: [:]) { result, entry in
             let (reading, values) = entry
             let valid = values.filter { value in
@@ -295,11 +288,9 @@ struct LexiconStore {
             let phrase = String(parts[1])
             guard !reading.isEmpty, !phrase.isEmpty else { continue }
             let weight = parts.count >= 3 ? Double(parts[2]) ?? 0.0 : 0.0
-            var list = weighted[reading, default: []]
-            if !list.contains(where: { $0.phrase == phrase }) {
-                list.append((phrase: phrase, weight: weight))
+            if weighted[reading]?.contains(where: { $0.phrase == phrase }) != true {
+                weighted[reading, default: []].append((phrase: phrase, weight: weight))
             }
-            weighted[reading] = list
         }
         // Sort each reading's candidates by weight descending
         var result = [String: [String]]()
@@ -312,6 +303,10 @@ struct LexiconStore {
     }
 
     static func loadPhraseContextStats() -> PhraseContextStats {
+        phraseContextStats
+    }
+
+    private static func readPhraseContextStats() -> PhraseContextStats {
         guard let url = resourceURL(named: "phrase_map", ext: "tsv"),
               let text = try? String(contentsOf: url, encoding: .utf8) else {
             return .empty
@@ -352,20 +347,20 @@ struct LexiconStore {
     ) -> Set<String> {
         var prefixes = Set<String>()
         for key in phraseCandidateMap.keys {
-            let scalars = Array(key)
-            guard scalars.count > 1 else { continue }
-            for i in 1..<scalars.count {
-                prefixes.insert(String(scalars.prefix(i)))
-            }
+            insertProperPrefixes(of: key, into: &prefixes)
         }
         for key in commonCharacterMap.keys {
-            let scalars = Array(key)
-            guard scalars.count > 1 else { continue }
-            for i in 1..<scalars.count {
-                prefixes.insert(String(scalars.prefix(i)))
-            }
+            insertProperPrefixes(of: key, into: &prefixes)
         }
         return prefixes
+    }
+
+    private static func insertProperPrefixes(of reading: String, into prefixes: inout Set<String>) {
+        var prefix = ""
+        for character in reading.dropLast() {
+            prefix.append(character)
+            prefixes.insert(prefix)
+        }
     }
 
     private func appendCandidates(forReading reading: String, into merged: inout [String], seen: inout Set<String>, limit: Int? = nil) {

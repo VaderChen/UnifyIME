@@ -23,20 +23,31 @@ struct ReadingWalker {
     // 實際組字與離線評估共用候選資格及分詞邊分數。
     func scoredEdges(_ tokens: [InputToken], start: Int, maxSpanLength: Int = 8,
                      allowToneCompletion: Bool = true) -> [ScoredEdge] {
-        guard tokens.indices.contains(start), maxSpanLength > 0 else { return [] }
         var edges: [ScoredEdge] = []
+        forEachScoredEdge(tokens, start: start, maxSpanLength: maxSpanLength,
+                         allowToneCompletion: allowToneCompletion) { edges.append($0) }
+        return edges
+    }
+
+    // 即時分詞直接消費邊，不建立只遍歷一次的完整候選邊陣列。
+    private func forEachScoredEdge(_ tokens: [InputToken], start: Int, maxSpanLength: Int,
+                                  allowToneCompletion: Bool, visit: (ScoredEdge) -> Void) {
+        guard tokens.indices.contains(start), maxSpanLength > 0 else { return }
         var combined = ""
+        var readings: [String] = []
+        readings.reserveCapacity(min(maxSpanLength, 8))
         for end in start..<min(tokens.count, start + min(maxSpanLength, 8)) {
             combined += tokens[end].rawValue
             let length = end - start + 1
-            let matches = lexicon.compositionMatches(readings: tokens[start...end].map(\.rawValue),
+            readings.append(tokens[end].rawValue)
+            let matches = lexicon.compositionMatches(readings: readings,
                                                      allowToneCompletion: allowToneCompletion)
             if matches.isEmpty {
                 if length == 1 {
                     let recalled = lexicon.resolveCandidates(for: combined)
                     let segment = ComposedSegment(languageID: languageID, reading: combined,
                         value: recalled.first ?? combined, start: start, length: 1, rawLength: rawLength(for: combined))
-                    edges.append(ScoredEdge(segment: segment, score: -4000.0))
+                    visit(ScoredEdge(segment: segment, score: -4000.0))
                 }
                 continue
             }
@@ -48,10 +59,9 @@ struct ReadingWalker {
             for (unit, score) in zip(units, scores) where score.isFinite {
                 let segment = ComposedSegment(languageID: languageID, reading: combined,
                     value: unit.surface, start: start, length: length, rawLength: rawCount)
-                edges.append(ScoredEdge(segment: segment, score: score))
+                visit(ScoredEdge(segment: segment, score: score))
             }
         }
-        return edges
     }
 
     private func rawLength(for reading: String) -> Int {
@@ -63,33 +73,34 @@ struct ReadingWalker {
     func resolveWalk(_ tokens: [InputToken]) -> [ComposedSegment] {
         guard !tokens.isEmpty else { return [] }
         func path(in range: Range<Int>, allowToneCompletion: Bool) -> [ComposedSegment] {
-            var bestScores = Array(repeating: -Double.infinity, count: tokens.count + 1)
-            var bestCounts = Array(repeating: Int.max, count: tokens.count + 1)
-            bestCounts[range.upperBound] = 0
-            var bestEdges: [ScoredEdge?] = Array(repeating: nil, count: tokens.count)
-            bestScores[range.upperBound] = 0
+            var bestScores = Array(repeating: -Double.infinity, count: range.count + 1)
+            var bestCounts = Array(repeating: Int.max, count: range.count + 1)
+            var bestSegments: [ComposedSegment?] = Array(repeating: nil, count: range.count)
+            bestCounts[range.count] = 0
+            bestScores[range.count] = 0
             for start in range.reversed() {
-                for edge in scoredEdges(tokens, start: start, maxSpanLength: range.upperBound - start,
-                                        allowToneCompletion: allowToneCompletion) {
-                    let next = start + edge.segment.length
+                let local = start - range.lowerBound
+                forEachScoredEdge(tokens, start: start, maxSpanLength: range.upperBound - start,
+                                 allowToneCompletion: allowToneCompletion) { edge in
+                    let next = local + edge.segment.length
                     let score = edge.score + bestScores[next]
-                    guard bestScores[next].isFinite else { continue }
+                    guard bestScores[next].isFinite else { return }
                     let segmentCount = bestCounts[next] + 1
-                    if score > bestScores[start] || (score == bestScores[start] && segmentCount < bestCounts[start]) {
-                        bestScores[start] = score
-                        bestCounts[start] = segmentCount
-                        bestEdges[start] = edge
+                    if score > bestScores[local] || (score == bestScores[local] && segmentCount < bestCounts[local]) {
+                        bestScores[local] = score
+                        bestCounts[local] = segmentCount
+                        bestSegments[local] = edge.segment
                     }
                     if isRuntimeTraceEnabled {
-                        appendRuntimeTrace("lattice.edge range=\(start)..<\(next) reading=\(edge.segment.reading) value=\(edge.segment.value) local=\(edge.score) suffix=\(bestScores[next]) total=\(score)")
+                        appendRuntimeTrace("lattice.edge range=\(start)..<\(next + range.lowerBound) reading=\(edge.segment.reading) value=\(edge.segment.value) local=\(edge.score) suffix=\(bestScores[next]) total=\(score)")
                     }
                 }
             }
             var result: [ComposedSegment] = []
-            var cursor = range.lowerBound
-            while cursor < range.upperBound, let edge = bestEdges[cursor] {
-                result.append(edge.segment)
-                cursor += edge.segment.length
+            var cursor = 0
+            while cursor < range.count, let segment = bestSegments[cursor] {
+                result.append(segment)
+                cursor += segment.length
             }
             return result
         }
@@ -120,7 +131,8 @@ struct ReadingWalker {
             let value = ranked.first?.unit.surface ?? segment.value
             contextual.append(ComposedSegment(languageID: segment.languageID, reading: segment.reading,
                 value: value, start: segment.start, length: segment.length, rawLength: segment.rawLength))
-            prefix = Array((prefix + [value]).suffix(3))
+            prefix.append(value)
+            if prefix.count > 3 { prefix.removeFirst() }
         }
         // 用各自實際左文重算完整路徑，局部改善不代表整句改善。
         if contextual == result { return result }
@@ -166,7 +178,8 @@ struct ReadingWalker {
             } else { return nil }
             guard score.isFinite else { return nil }
             total += score
-            prefix = Array((prefix + [segment.value]).suffix(3))
+            prefix.append(segment.value)
+            if prefix.count > 3 { prefix.removeFirst() }
             cursor += segment.length
         }
         return cursor == tokens.count && total.isFinite ? total : nil

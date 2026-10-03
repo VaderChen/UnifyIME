@@ -121,13 +121,16 @@ enum PhoneticIMECore {
             break
         }
 
-        if let mapped = SessionCtl.mapKeySequence(token.lowercased()) {
+        let loweredToken = token.lowercased()
+        if let mapped = SessionCtl.mapKeySequence(loweredToken) {
             state.invalidateAutomaticDecisions()
             stabilizePrefixBeforeAppend(state: &state)
             if state.pendingRawInput.isEmpty, !state.currentReading.isEmpty {
                 state.pendingRawInput = UnifiedCompositionState.sourceInput(for: state.currentReading)
             }
-            for (rawKey, symbol) in zip(token.lowercased().map(String.init), mapped.map(String.init)) {
+            for (rawCharacter, mappedCharacter) in zip(loweredToken, mapped) {
+                let rawKey = String(rawCharacter)
+                let symbol = String(mappedCharacter)
                 let reordered = BopomofoOrderCorrection.appending(symbol, to: state.currentReading)
                 // 聲調先到但音節不合法時，允許後續按鍵逐步補齊並重排；
                 // 無法修復就保留原音節，避免污染下一個音節。
@@ -135,10 +138,7 @@ enum PhoneticIMECore {
                 if reordered == nil && (pendingTone || SessionCtl.shouldFinalizeCurrentReading(current: state.currentReading, incoming: symbol)) {
                     finalizeCurrentReading(state: &state)
                 }
-                if state.currentReading.isEmpty,
-                   symbol.unicodeScalars.count == 1,
-                   let scalar = symbol.unicodeScalars.first,
-                   CharacterSet(charactersIn: "ˇˋˊ˙").contains(scalar) {
+                if state.currentReading.isEmpty, "ˇˋˊ˙".contains(mappedCharacter) {
                     continue
                 }
                 if state.currentReading.isEmpty {
@@ -616,13 +616,14 @@ enum PhoneticIMECore {
         let rawSegment = ComposedSegment(languageID: SessionCtl.traditionalChineseProvider.languageID, reading: state.currentReading, value: state.currentReading, start: insertionIndex, length: 1, rawLength: rawLength(for: state.currentReading))
         var inserted = false
         var merged: [ComposedSegment] = []
+        let allReadings = state.allReadings
         for segment in lockedBase {
             let end = segment.start + segment.length
             if !inserted, segment.start < insertionIndex, insertionIndex < end,
-               segment.start >= 0, end <= state.allReadings.count {
+               segment.start >= 0, end <= allReadings.count {
                 // 顯示時才分開跨越插入點的詞，原讀音座標與確認鎖定保持不變。
-                let prefixReading = state.allReadings[segment.start..<insertionIndex].joined()
-                let suffixReading = state.allReadings[insertionIndex..<end].joined()
+                let prefixReading = allReadings[segment.start..<insertionIndex].joined()
+                let suffixReading = allReadings[insertionIndex..<end].joined()
                 let prefixLength = insertionIndex - segment.start
                 // 原注音依音節切分；候選依完整字元切分，尾段保留所有剩餘文字。
                 let prefixCharacters = segment.value == segment.reading ? prefixReading.count : prefixLength
@@ -674,10 +675,12 @@ enum PhoneticIMECore {
 
     private static func stabilizePrefixBeforeAppend(state: inout UnifiedCompositionState) {
         let all = state.allReadings
-        guard all.count > candidateWindowLength else { return }
+        let windowLength = candidateWindowLength
+        guard all.count > windowLength else { return }
+        // 每次操作只讀一次設定；下一次操作仍能取得更新後的設定。
         // 保留最多 2 個音節的邊界回溯，讓跨詞組仍有機會修正。
-        let rollback = min(2, candidateWindowLength - 1)
-        let cutoff = all.count - candidateWindowLength - rollback
+        let rollback = min(2, windowLength - 1)
+        let cutoff = all.count - windowLength - rollback
         guard cutoff > 0 else { return }
         let segments = resolvedSegmentsRespectingOverrides(for: state)
         for segment in segments where segment.length > 1 && segment.start + segment.length <= cutoff {

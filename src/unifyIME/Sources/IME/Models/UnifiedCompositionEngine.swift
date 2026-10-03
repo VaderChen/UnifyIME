@@ -19,32 +19,63 @@ struct UnifiedCompositionState {
     var readingRawInputs: [String] = []
     var pendingRawInput = ""
 
-    var protectedKeys: Set<CompositionSegmentKey> { explicitLockedKeys.union(automaticLockedKeys) }
+    var protectedKeys: Set<CompositionSegmentKey> {
+        if explicitLockedKeys.isEmpty { return automaticLockedKeys }
+        if automaticLockedKeys.isEmpty { return explicitLockedKeys }
+        return explicitLockedKeys.union(automaticLockedKeys)
+    }
 
     static func sourceInput(for reading: String) -> String {
+        guard !reading.isEmpty else { return "" }
         let inverse = SessionCtl.inverseBopomofoMap()
-        return reading.map { inverse[String($0)] ?? String($0) }.joined()
+        var result = ""
+        for character in reading {
+            let symbol = String(character)
+            result += inverse[symbol] ?? symbol
+        }
+        return result
     }
 
     /// 舊呼叫端直接建立讀音時使用鍵位映射；實際輸入路徑優先使用保存的來源。
     var sourceInputs: [String] {
-        guard readingRawInputs.count == allReadings.count else {
+        guard readingRawInputs.count == readings.count + trailingReadings.count else {
             return allReadings.map(Self.sourceInput(for:))
         }
         return readingRawInputs
     }
 
+    private struct SourceSpanContext {
+        let readings: [String]
+        let inputs: [String]
+        let offsets: [Int]
+        let cursor: Int
+        let hasPendingReading: Bool
+        let pendingLength: Int
+
+        func span(for key: CompositionSegmentKey) -> CompositionInputSpan? {
+            guard key.start >= 0, key.length > 0, key.start <= readings.count,
+                  key.length <= readings.count - key.start else { return nil }
+            let end = key.start + key.length
+            guard readings[key.start..<end].joined() == key.reading else { return nil }
+            guard !hasPendingReading || key.start >= cursor || end <= cursor else { return nil }
+            let raw = inputs[key.start..<end].joined()
+            let start = offsets[key.start] + (hasPendingReading && key.start >= cursor ? pendingLength : 0)
+            return CompositionInputSpan(start: start, end: start + raw.count, input: raw)
+        }
+    }
+
+    private func sourceSpanContext() -> SourceSpanContext {
+        let inputs = sourceInputs
+        var offsets = [0]
+        offsets.reserveCapacity(inputs.count + 1)
+        for input in inputs { offsets.append(offsets.last! + input.count) }
+        return SourceSpanContext(readings: allReadings, inputs: inputs, offsets: offsets,
+            cursor: currentCompositionCursorIndex(), hasPendingReading: !currentReading.isEmpty,
+            pendingLength: pendingRawInput.isEmpty ? Self.sourceInput(for: currentReading).count : pendingRawInput.count)
+    }
+
     func inputSpan(for key: CompositionSegmentKey) -> CompositionInputSpan? {
-        guard key.start >= 0, key.length > 0, key.start + key.length <= allReadings.count else { return nil }
-        guard allReadings[key.start..<(key.start + key.length)].joined() == key.reading else { return nil }
-        let cursor = currentCompositionCursorIndex()
-        guard currentReading.isEmpty || key.start >= cursor || key.start + key.length <= cursor else { return nil }
-        let units = sourceInputs
-        let raw = units[key.start..<(key.start + key.length)].joined()
-        let pendingLength = pendingRawInput.isEmpty ? Self.sourceInput(for: currentReading).count : pendingRawInput.count
-        let start = units.prefix(key.start).reduce(0) { $0 + $1.count }
-            + (!currentReading.isEmpty && key.start >= currentCompositionCursorIndex() ? pendingLength : 0)
-        return CompositionInputSpan(start: start, end: start + raw.count, input: raw)
+        sourceSpanContext().span(for: key)
     }
 
     mutating func invalidateAutomaticDecisions() {
@@ -70,10 +101,12 @@ struct UnifiedCompositionState {
     }
 
     func attachSources(to presentation: CompositionPresentationState) -> CompositionPresentationState {
+        // 同一份畫面中的片段與候選共享來源及字元前綴和，避免逐項重算。
+        let sources = sourceSpanContext()
         func annotate(_ segment: ComposedSegment, preview: Bool = false) -> ComposedSegment {
             var result = segment
             let key = CompositionSegmentKey(start: segment.start, length: segment.length, reading: segment.reading)
-            result.inputSpan = inputSpan(for: key)
+            result.inputSpan = sources.span(for: key)
             result.confirmation = preview ? .preview : (explicitLockedKeys.contains(key) ? .confirmed : .inferred)
             return result
         }
@@ -81,7 +114,7 @@ struct UnifiedCompositionState {
             ? presentation.candidateEntries[selectedCandidateIndex].replacementKey : nil
         let entries = presentation.candidateEntries.map { entry -> CandidateEntry in
             var result = entry
-            result.inputSpan = inputSpan(for: entry.replacementKey)
+            result.inputSpan = sources.span(for: entry.replacementKey)
             return result
         }
         return CompositionPresentationState(baseSegments: presentation.baseSegments.map { annotate($0) },
@@ -126,7 +159,9 @@ struct UnifiedCompositionState {
     }
 
     var allReadings: [String] {
-        readings + trailingReadings
+        if trailingReadings.isEmpty { return readings }
+        if readings.isEmpty { return trailingReadings }
+        return readings + trailingReadings
     }
 
     var hasComposition: Bool {
@@ -802,7 +837,7 @@ enum UnifiedCompositionEngine {
             }
             let committed = resolveWalk([reading]).map(\.value).joined()
             let value: String? = (!committed.isEmpty && committed != reading) ? committed : nil
-            committedReadingCache[reading] = value
+            committedReadingCache[reading] = .some(value)
             return value
         }
 
@@ -1005,39 +1040,36 @@ enum UnifiedCompositionEngine {
 
             func solveRange(_ range: Range<Int>) -> DPState {
                 guard !range.isEmpty else { return (0, [], [], 0) }
-                var memo: [Int: DPState] = [:]
-
-                func solve(_ index: Int) -> DPState {
-                    if let cached = memo[index] { return cached }
-                    if index >= range.upperBound {
-                        let empty: DPState = (0, [], [], 0)
-                        memo[index] = empty
-                        return empty
-                    }
-
-                    var best = solve(index + 1)
-                    best.score -= 5
-                    best.pieces.insert(String(chars[index]), at: 0)
-
+                var scores = Array(repeating: 0.0, count: range.count + 1)
+                var choices: [RawSpanCoverage?] = Array(repeating: nil, count: range.count)
+                for index in range.reversed() {
+                    let local = index - range.lowerBound
+                    scores[local] = scores[local + 1] - 5
                     for coverage in byStart[index] ?? [] {
                         guard coverage.end <= range.upperBound else { continue }
-                        let tail = solve(coverage.end)
-                        let candidate: DPState = (
-                            coverage.score + tail.score,
-                            [coverage.text] + tail.pieces,
-                            [coverage] + tail.coverages,
-                            (coverage.end - coverage.start) + tail.covered
-                        )
-                        if candidate.score > best.score {
-                            best = candidate
+                        let score = coverage.score + scores[coverage.end - range.lowerBound]
+                        if score > scores[local] {
+                            scores[local] = score
+                            choices[local] = coverage
                         }
                     }
-
-                    memo[index] = best
-                    return best
                 }
-
-                return solve(range.lowerBound)
+                var pieces: [String] = []
+                var selected: [RawSpanCoverage] = []
+                var covered = 0
+                var index = range.lowerBound
+                while index < range.upperBound {
+                    if let coverage = choices[index - range.lowerBound] {
+                        pieces.append(coverage.text)
+                        selected.append(coverage)
+                        covered += coverage.end - coverage.start
+                        index = coverage.end
+                    } else {
+                        pieces.append(String(chars[index]))
+                        index += 1
+                    }
+                }
+                return (scores[0], pieces, selected, covered)
             }
 
             let gapResults = profileRuntime("unified.mergeSpanCoverages.dp", details: "buffer_len=\(rawBuffer.count) gaps=\(uncoveredRanges.count)") {

@@ -22,7 +22,7 @@ struct RankingFeatureEncoder {
         let followingCount = Double(context.followingTokens.count)
         let exactTokenMatch = unit.surface == context.combinedToken ? 1.0 : 0.0
         let sameLanguage = unit.languageID == context.languageID ? 1.0 : 0.0
-        let isPhrase = unit.surface.count > 1 ? 1.0 : 0.0
+        let isPhrase = candidateLength > 1 ? 1.0 : 0.0
         let hasToneMarks = context.combinedToken.contains(where: Self.isToneMark(_:)) ? 1.0 : 0.0
         let normalizedMatch = Self.normalizeToken(unit.readingOrToken) == Self.normalizeToken(context.combinedToken) ? 1.0 : 0.0
         let script = Self.scriptClass(for: unit.surface)
@@ -48,13 +48,14 @@ struct RankingFeatureEncoder {
             Double(coordinates?.tokenCount ?? context.allTokens.count)
         ]
 
-        features.append(contentsOf: oneHot(index: script.rawValue, count: 5))
-        features.append(contentsOf: oneHot(index: languageBucket(for: unit.languageID), count: 4))
+        features.reserveCapacity(RankingFeatureVector.expectedDimension)
+        appendOneHot(index: script.rawValue, count: 5, into: &features)
+        appendOneHot(index: languageBucket(for: unit.languageID), count: 4, into: &features)
         features.append(contentsOf: aggregateContextFeatures(context.precedingValues))
         features.append(contentsOf: aggregateFollowingFeatures(context.followingTokens))
         features.append(contentsOf: localContextFeatures(unit: unit, context: context))
         features.append(contentsOf: phraseContextFeatures(unit: unit, context: context))
-        features.append(contentsOf: candidateIdentityFeatures(unit: unit, context: context))
+        appendCandidateIdentityFeatures(unit: unit, context: context, into: &features)
 
         if features.count < RankingFeatureVector.expectedDimension {
             features.append(contentsOf: Array(repeating: 0.0, count: RankingFeatureVector.expectedDimension - features.count))
@@ -66,21 +67,25 @@ struct RankingFeatureEncoder {
     }
 
     private func aggregateContextFeatures(_ values: [String]) -> [Double] {
-        let recent = Array(values.suffix(3))
-        let totalChars = Double(recent.reduce(0) { $0 + $1.count })
-        let hanCount = Double(recent.reduce(0) { partial, value in
-            partial + value.unicodeScalars.filter(Self.isHan(_:)).count
-        })
-        let mixedCount = Double(recent.filter { Self.scriptClass(for: $0) == .mixed }.count)
-        return [Double(recent.count), totalChars, hanCount, mixedCount]
+        let recent = values.suffix(3)
+        var totalChars = 0, hanCount = 0, mixedCount = 0
+        for value in recent {
+            totalChars += value.count
+            for scalar in value.unicodeScalars where Self.isHan(scalar) { hanCount += 1 }
+            if Self.scriptClass(for: value) == .mixed { mixedCount += 1 }
+        }
+        return [Double(recent.count), Double(totalChars), Double(hanCount), Double(mixedCount)]
     }
 
     private func aggregateFollowingFeatures(_ tokens: [InputToken]) -> [Double] {
-        let recent = Array(tokens.prefix(3))
-        let totalChars = Double(recent.reduce(0) { $0 + $1.rawValue.count })
-        let zhCount = Double(recent.filter { $0.languageID == "zh-Hant" }.count)
-        let latinCount = Double(recent.filter { Self.scriptClass(for: $0.rawValue) == .latin }.count)
-        return [Double(recent.count), totalChars, zhCount, latinCount]
+        let recent = tokens.prefix(3)
+        var totalChars = 0, zhCount = 0, latinCount = 0
+        for token in recent {
+            totalChars += token.rawValue.count
+            if token.languageID == "zh-Hant" { zhCount += 1 }
+            if Self.scriptClass(for: token.rawValue) == .latin { latinCount += 1 }
+        }
+        return [Double(recent.count), Double(totalChars), Double(zhCount), Double(latinCount)]
     }
 
     private func localContextFeatures(unit: CandidateUnit, context: CandidateSelectionContext) -> [Double] {
@@ -89,7 +94,7 @@ struct RankingFeatureEncoder {
         let next1 = context.followingTokens.first?.rawValue ?? ""
         let next2 = context.followingTokens.dropFirst().first?.rawValue ?? ""
         let precedingJoined = context.precedingValues.suffix(3).joined(separator: "|")
-        let followingJoined = context.followingTokens.prefix(3).map(\.rawValue).joined(separator: "|")
+        let followingJoined = context.followingTokens.prefix(3).lazy.map(\.rawValue).joined(separator: "|")
 
         return [
             Double(prev1.count),
@@ -116,31 +121,31 @@ struct RankingFeatureEncoder {
         let prevTail = String(prev1.suffix(1))
         let next1Reading = context.followingTokens.first?.rawValue ?? ""
         let combinedPlusNextReading = context.combinedToken + next1Reading
+        let precedingSurface = prev1 + unit.surface
 
         return [
             phraseLogWeight(forSurface: unit.surface),
-            phraseLogWeight(forSurface: prev1 + unit.surface),
+            phraseLogWeight(forSurface: precedingSurface),
             phraseLogWeight(forSurface: prevTail + unit.surface),
             normalizedReadingCount(forReading: context.combinedToken),
             normalizedBestPhraseLength(forReading: context.combinedToken),
             normalizedReadingCount(forReading: combinedPlusNextReading),
             normalizedBestPhraseLength(forReading: combinedPlusNextReading),
-            phraseExists(forSurface: prev1 + unit.surface) ? 1.0 : 0.0,
+            phraseExists(forSurface: precedingSurface) ? 1.0 : 0.0,
         ]
     }
 
-    private func candidateIdentityFeatures(unit: CandidateUnit, context: CandidateSelectionContext) -> [Double] {
+    private func appendCandidateIdentityFeatures(unit: CandidateUnit, context: CandidateSelectionContext,
+                                                 into features: inout [Double]) {
         let prev1 = context.precedingValues.last ?? ""
         let next1 = context.followingTokens.first?.rawValue ?? ""
-        let signatures = [
-            unit.surface,
-            prev1 + "|" + unit.surface,
-            unit.surface + "|" + next1,
-            prev1 + "|" + unit.surface + "|" + next1,
-        ]
-        return signatures.flatMap { signature in
-            oneHot(index: stableHashBucket(for: signature, count: 8), count: 8)
+        func append(_ signature: String) {
+            appendOneHot(index: stableHashBucket(for: signature, count: 8), count: 8, into: &features)
         }
+        append(unit.surface)
+        append(prev1 + "|" + unit.surface)
+        append(unit.surface + "|" + next1)
+        append(prev1 + "|" + unit.surface + "|" + next1)
     }
 
     private func languageBucket(for languageID: String) -> Int {
@@ -152,13 +157,16 @@ struct RankingFeatureEncoder {
         }
     }
 
-    private func oneHot(index: Int, count: Int) -> [Double] {
-        (0..<count).map { $0 == index ? 1.0 : 0.0 }
+    private func appendOneHot(index: Int, count: Int, into features: inout [Double]) {
+        for position in 0..<count { features.append(position == index ? 1.0 : 0.0) }
     }
 
+    private static let toneMarks = CharacterSet(charactersIn: "ˇˋˊ˙")
     private static func normalizeToken(_ text: String) -> String {
-        let toneMarks = CharacterSet(charactersIn: "ˇˋˊ˙")
-        return text.unicodeScalars.filter { !toneMarks.contains($0) }.map(String.init).joined()
+        var result = String.UnicodeScalarView()
+        result.reserveCapacity(text.utf8.count)
+        for scalar in text.unicodeScalars where !toneMarks.contains(scalar) { result.append(scalar) }
+        return String(result)
     }
 
     private static func isToneMark(_ char: Character) -> Bool {
@@ -184,7 +192,7 @@ struct RankingFeatureEncoder {
             }
         }
 
-        let activeCount = [hasHan, hasLatin, hasKana, hasOther].filter { $0 }.count
+        let activeCount = (hasHan ? 1 : 0) + (hasLatin ? 1 : 0) + (hasKana ? 1 : 0) + (hasOther ? 1 : 0)
         if activeCount > 1 { return .mixed }
         if hasHan { return .han }
         if hasLatin { return .latin }
@@ -198,7 +206,7 @@ struct RankingFeatureEncoder {
 
     private func hanRatio(for text: String) -> Double {
         guard !text.isEmpty else { return 0.0 }
-        let hanCount = text.unicodeScalars.filter(Self.isHan(_:)).count
+        let hanCount = text.unicodeScalars.reduce(0) { $0 + (Self.isHan($1) ? 1 : 0) }
         return Double(hanCount) / Double(max(text.count, 1))
     }
 
@@ -224,7 +232,7 @@ struct RankingFeatureEncoder {
         guard !lhs.isEmpty, !rhs.isEmpty else { return 0.0 }
         let leftSet = Set(lhs)
         let rightSet = Set(rhs)
-        let overlap = leftSet.intersection(rightSet).count
+        let overlap = rightSet.reduce(0) { $0 + (leftSet.contains($1) ? 1 : 0) }
         return Double(overlap) / Double(max(min(leftSet.count, rightSet.count), 1))
     }
 

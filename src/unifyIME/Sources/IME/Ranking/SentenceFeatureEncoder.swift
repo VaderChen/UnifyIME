@@ -9,27 +9,49 @@ struct SentenceFeatureEncoder {
         let segmentCount = Double(path.segments.count)
         let textLength = Double(path.text.count)
         let readingCount = Double(path.readings.count)
-        let lengths = path.segments.map(\.value.count)
-        let avgSegmentLength = lengths.isEmpty ? 0.0 : Double(lengths.reduce(0, +)) / Double(lengths.count)
-        let maxSegmentLength = Double(lengths.max() ?? 0)
-        let singleCount = Double(lengths.filter { $0 == 1 }.count)
-        let multiCount = Double(lengths.filter { $0 > 1 }.count)
-        let phraseCount = Double(path.segments.filter { $0.value.count > 1 }.count)
-        let fallbackCount = Double(path.segments.filter { $0.value == $0.reading }.count)
+        var totalLength = 0
+        var maxLength = 0
+        var singles = 0
+        var multiples = 0
+        var fallbacks = 0
+        var phraseSum = 0.0
+        var minPhraseWeight = Double.infinity
+        var maxPhraseWeight = 0.0
+        var adjacencySum = 0.0
+        var adjacencyMin = Double.infinity
+        var previous: String?
+        // 保留原先由左到右的浮點加總順序，避免改變模型輸入位元。
+        for segment in path.segments {
+            let length = segment.value.count
+            totalLength += length
+            maxLength = max(maxLength, length)
+            if length == 1 { singles += 1 }
+            if length > 1 { multiples += 1 }
+            if segment.value == segment.reading { fallbacks += 1 }
+            let weight = Self.phraseLogWeight(for: segment.value)
+            phraseSum += weight
+            minPhraseWeight = min(minPhraseWeight, weight)
+            maxPhraseWeight = max(maxPhraseWeight, weight)
+            if let previous {
+                let adjacent = Self.bigramWeight(previous, segment.value)
+                adjacencySum += adjacent
+                adjacencyMin = min(adjacencyMin, adjacent)
+            }
+            previous = segment.value
+        }
+        let avgSegmentLength = path.segments.isEmpty ? 0.0 : Double(totalLength) / segmentCount
+        let maxSegmentLength = Double(maxLength)
+        let singleCount = Double(singles)
+        let multiCount = Double(multiples)
+        let phraseCount = multiCount
+        let fallbackCount = Double(fallbacks)
         let leftText = context.committedLeftContext.suffix(3).joined(separator: "|")
         let rightText = context.committedRightContext.prefix(3).joined(separator: "|")
-
-        let phraseWeights = path.segments.map { Self.phraseLogWeight(for: $0.value) }
-        let avgPhraseWeight = phraseWeights.isEmpty ? 0.0 : phraseWeights.reduce(0, +) / Double(phraseWeights.count)
-        let minPhraseWeight = phraseWeights.min() ?? 0.0
-        let maxPhraseWeight = phraseWeights.max() ?? 0.0
-
-        let adjacency = zip(path.segments, path.segments.dropFirst()).map { lhs, rhs in
-            Self.bigramWeight(lhs.value, rhs.value)
-        }
-        let adjacencySum = adjacency.reduce(0, +)
-        let adjacencyMin = adjacency.min() ?? 0.0
-        let adjacencyAvg = adjacency.isEmpty ? 0.0 : adjacencySum / Double(adjacency.count)
+        let avgPhraseWeight = path.segments.isEmpty ? 0.0 : phraseSum / segmentCount
+        if path.segments.isEmpty { minPhraseWeight = 0.0 }
+        let adjacencyCount = max(0, path.segments.count - 1)
+        if adjacencyCount == 0 { adjacencyMin = 0.0 }
+        let adjacencyAvg = adjacencyCount == 0 ? 0.0 : adjacencySum / Double(adjacencyCount)
 
         let features: [Double] = [
             path.localScore,
@@ -53,7 +75,7 @@ struct SentenceFeatureEncoder {
             Self.stableHash(leftText),
             Self.stableHash(rightText),
             Self.stableHash(path.text),
-            Self.stableHash(path.segments.map(\.value).joined(separator: "|")),
+            Self.stableHash(path.segments.lazy.map(\.value).joined(separator: "|")),
             Self.hanRatio(path.text),
             Self.boundaryMatchScore(path: path, context: context)
         ]
@@ -81,9 +103,9 @@ struct SentenceFeatureEncoder {
 
     private static func hanRatio(_ text: String) -> Double {
         guard !text.isEmpty else { return 0.0 }
-        let hanCount = text.unicodeScalars.filter {
-            (0x3400...0x4DBF).contains($0.value) || (0x4E00...0x9FFF).contains($0.value)
-        }.count
+        let hanCount = text.unicodeScalars.reduce(0) { count, scalar in
+            count + (((0x3400...0x4DBF).contains(scalar.value) || (0x4E00...0x9FFF).contains(scalar.value)) ? 1 : 0)
+        }
         return Double(hanCount) / Double(max(text.count, 1))
     }
 

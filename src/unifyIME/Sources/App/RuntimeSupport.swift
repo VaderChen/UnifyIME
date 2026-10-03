@@ -337,13 +337,14 @@ extension CandidateController {
     static let preferred = VerticalCandidateController()
 }
 
-func imeDebugLog(_ message: String) {
+func imeDebugLog(_ message: @autoclosure () -> String) {
     guard isRuntimeTraceEnabled else { return }
-    NSLog("%@", message)
+    NSLog("%@", message())
 }
 
-func appendRuntimeTrace(_ line: String) {
+func appendRuntimeTrace(_ line: @autoclosure () -> String) {
     guard isRuntimeTraceEnabled else { return }
+    let line = line()
 #if UNIFYIME_CLI
     // CLI 與 App 共用同一 trace；CLI 額外鏡像到 stderr，方便探針收集。
     fputs("[trace] \(line)\n", stderr)
@@ -361,8 +362,9 @@ func appendRuntimeTrace(_ line: String) {
     }
 }
 
-func appendFocusedTrace(_ line: String) {
+func appendFocusedTrace(_ line: @autoclosure () -> String) {
     guard isRuntimeTraceEnabled else { return }
+    let line = line()
 #if UNIFYIME_CLI
     fputs("[trace][focus] \(line)\n", stderr)
 #endif

@@ -192,30 +192,32 @@ extension SessionCtl {
         return best[0]?.segments
     }
 
-    static func inverseBopomofoMap() -> [String: String] {
+    // 鍵位表不可變；即時組字與離線轉換共用一次建立的反查表。
+    private static let inverseKeyMap: [String: String] = {
         var inverse: [String: String] = [:]
         for (key, value) in bopomofoMap where inverse[value] == nil {
             inverse[value] = key
         }
         return inverse
-    }
+    }()
+
+    static func inverseBopomofoMap() -> [String: String] { inverseKeyMap }
 
     static func keySequence(for readings: [String]) -> String {
-        let inverse = inverseBopomofoMap()
-        return readings.map { reading in
-            reading.map { scalar in
-                inverse[String(scalar)] ?? "?"
-            }.joined()
-        }.joined(separator: " ")
+        var result = ""
+        for (index, reading) in readings.enumerated() {
+            if index > 0 { result.append(" ") }
+            for character in reading { result += inverseKeyMap[String(character)] ?? "?" }
+        }
+        return result
     }
 
     static func keyTokens(for readings: [String]) -> [String] {
-        let inverse = inverseBopomofoMap()
-        return readings.flatMap { reading in
-            reading.map { scalar in
-                inverse[String(scalar)] ?? "?"
-            }
+        var result: [String] = []
+        for reading in readings {
+            for character in reading { result.append(inverseKeyMap[String(character)] ?? "?") }
         }
+        return result
     }
 
     static func simulateIncrementalInput(readings: [String]) -> String {

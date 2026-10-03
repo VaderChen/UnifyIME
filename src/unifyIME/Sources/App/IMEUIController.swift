@@ -17,10 +17,6 @@ final class IMEUIController: NSObject, CandidateControllerDelegate {
     private var focusedReading: String?
     private(set) var selectedCandidateIndex = 0
 
-    private var candidates: [String] {
-        candidateEntries.map(\.text)
-    }
-
     func activate(client: Any!, selectionHandler: CandidateSelectionHandler) {
         self.activeClient = client as? IMKTextInput
         self.selectionHandler = selectionHandler
@@ -73,7 +69,7 @@ final class IMEUIController: NSObject, CandidateControllerDelegate {
 
     func highlightPrevious() -> Bool {
         guard legacyCandidateControllerEnabled else { return false }
-        guard !candidates.isEmpty else { return false }
+        guard !candidateEntries.isEmpty else { return false }
         if selectedCandidateIndex > 0 {
             selectedCandidateIndex -= 1
             return true
@@ -83,8 +79,8 @@ final class IMEUIController: NSObject, CandidateControllerDelegate {
 
     func highlightNext() -> Bool {
         guard legacyCandidateControllerEnabled else { return false }
-        guard !candidates.isEmpty else { return false }
-        if selectedCandidateIndex + 1 < candidates.count {
+        guard !candidateEntries.isEmpty else { return false }
+        if selectedCandidateIndex + 1 < candidateEntries.count {
             selectedCandidateIndex += 1
             return true
         }
@@ -93,13 +89,13 @@ final class IMEUIController: NSObject, CandidateControllerDelegate {
 
     func candidateCountForController(_ controller: CandidateController) -> UInt {
         guard legacyCandidateControllerEnabled else { return 0 }
-        return UInt(candidates.count)
+        return UInt(candidateEntries.count)
     }
 
     func candidateController(_ controller: CandidateController, candidateAtIndex index: UInt) -> String {
         guard legacyCandidateControllerEnabled else { return "" }
-        guard candidates.indices.contains(Int(index)) else { return "" }
-        return candidates[Int(index)]
+        guard candidateEntries.indices.contains(Int(index)) else { return "" }
+        return candidateEntries[Int(index)].text
     }
 
     func candidateController(_ controller: CandidateController, readingAtIndex index: UInt) -> String? {

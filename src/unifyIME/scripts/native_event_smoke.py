@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[3]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--output-dir", type=Path)
 parser.add_argument("--strategy-only", action="store_true", help="只執行隔離策略驗證")
+parser.add_argument("--release", action="store_true", help="使用正式版 Swift 最佳化驗證原生事件")
 options = parser.parse_args()
 artifact_root = ROOT / "artifacts" / "native-event-smoke"
 artifact_root.mkdir(parents=True, exist_ok=True)
@@ -128,6 +129,8 @@ strategy = ROOT/'src/unifyIME/tests/CompositionStrategyProbe.swift'
 (COPIES/strategy.name).write_text(strategy.read_text())
 files.append(str(COPIES/strategy.name))
 args = ['swiftc','-D','UNIFYIME_CLI','-parse-as-library','-module-name','UnifyIMEIsolated','-target',f'{platform.machine()}-apple-macos13.0']
+if options.release:
+    args += ['-O', '-whole-module-optimization']
 for name in ['AppKit','Carbon','CoreML','InputMethodKit','WebKit']:
     args += ['-framework',name]
 with (OUT/'isolated-build.log').open('w') as log:

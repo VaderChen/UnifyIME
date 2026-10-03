@@ -1,6 +1,25 @@
 # CLI 模擬輸入測試盤點與交接
 
-日期：2026-09-05。本文件是靜態檢視結果；以下案例數不代表本次動態測試通過數。
+初次盤點：2026-09-05。最新動態驗證：2026-10-03。下方歷史盤點保留當時的問題與案例數，不代表目前仍有相同缺陷。
+
+## 目前驗證入口與結果
+
+原生事件探針使用隔離資料及偏好 suite，可用 `python3 src/unifyIME/scripts/native_event_smoke.py --release` 重跑。效能探針預設同樣以 release 建置；`--functions-only` 量測函式工作負載，未指定時量測詞庫及逐鍵混打。兩者都不安裝或切換系統輸入法。
+
+```sh
+python3 src/unifyIME/scripts/native_event_smoke.py --release
+python3 src/unifyIME/scripts/maintenance_smoke.py
+python3 src/unifyIME/scripts/performance_smoke.py --functions-only --runs 3
+python3 src/unifyIME/scripts/performance_smoke.py --runs 3
+```
+
+2026-10-03 的同一來源通過 62 項策略、394 個原生事件、401 個原始按鍵案例、24 個混打 Smoke，以及 10 個模型交易與資料契約檢查。逐鍵追加維持 46/50；長句維持 regression 23 通過／9 既有失敗、explore 0 通過／8 既有缺口。完整詞庫與候選、模型特徵及實際 Core ML 輸出均已比對修改前基準。
+
+`raw_selftest.py`、`mixed_live_smoke.py` 等 runner 可用 `UNIFYIME_CLI_PATH` 指向指定執行檔；它們本身不會改寫程式的個人資料位置。若要完全隔離資料，應使用效能或原生探針建立的隔離執行檔，不直接以正式安裝的 App 做會記錄詞頻的選字測試。原生探針使用模擬 IMK client，仍不代表所有編輯器整合行為。
+
+基準、限制及重跑參數見 [函式級最佳化報告](函式級效能與記憶體最佳化_20261003.md)、[整體最佳化報告](效能與記憶體最佳化_20261003.md) 與 [發布驗證](發布驗證_20261003.md)。
+
+## 2026-09-05 歷史盤點
 
 ## 執行限制
 

@@ -17,15 +17,9 @@ enum MixedCompositionResolver {
     private static let bopomofoGarbageSet = CharacterSet(
         charactersIn: "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦˇˋˊ˙"
     )
-    private static let englishCoverageCacheLock = NSLock()
-    private static let englishCoverageCacheCapacity = 256
-    private static var englishCoverageCandidateCache: [String: [RawSpanCoverage]] = [:]
-    private static var englishCoverageCacheOrder: [String] = []
-    private static let incrementalMergeCacheLock = NSLock()
-    private static let incrementalMergeCacheCapacity = 256
+    private static let englishCoverageCandidateCache = BoundedLRUCache<String, [RawSpanCoverage]>(capacity: 256)
     private static let incrementalTailReanalysisLength = 12
-    private static var incrementalMergeCache: [String: MixedMergeAnalysis] = [:]
-    private static var incrementalMergeCacheOrder: [String] = []
+    private static let incrementalMergeCache = BoundedLRUCache<String, MixedMergeAnalysis>(capacity: 256)
 
     static func resolve(
         rawBuffer: String,
@@ -318,26 +312,11 @@ enum MixedCompositionResolver {
 
     private static func cachedIncrementalAnalysis(for rawBuffer: String) -> MixedMergeAnalysis? {
         guard !rawBuffer.isEmpty else { return nil }
-        incrementalMergeCacheLock.lock()
-        let cached = incrementalMergeCache[rawBuffer]
-        if cached != nil {
-            incrementalMergeCacheOrder.removeAll { $0 == rawBuffer }
-            incrementalMergeCacheOrder.append(rawBuffer)
-        }
-        incrementalMergeCacheLock.unlock()
-        return cached
+        return incrementalMergeCache.value(for: rawBuffer)
     }
 
     private static func storeIncrementalAnalysis(_ analysis: MixedMergeAnalysis, for rawBuffer: String) {
-        incrementalMergeCacheLock.lock()
-        incrementalMergeCache[rawBuffer] = analysis
-        incrementalMergeCacheOrder.removeAll { $0 == rawBuffer }
-        incrementalMergeCacheOrder.append(rawBuffer)
-        while incrementalMergeCacheOrder.count > incrementalMergeCacheCapacity {
-            let evicted = incrementalMergeCacheOrder.removeFirst()
-            incrementalMergeCache.removeValue(forKey: evicted)
-        }
-        incrementalMergeCacheLock.unlock()
+        incrementalMergeCache.store(analysis, for: rawBuffer)
     }
 
     private static func nonOverlappingCoverages(_ coverages: [RawSpanCoverage]) -> [RawSpanCoverage] {
@@ -432,56 +411,52 @@ enum MixedCompositionResolver {
             candidatesByStart[coverage.start, default: []].append(coverage)
         }
 
-        struct ExactSpanChoice {
-            let score: Int
-            let coveredLength: Int
-            let coverages: [RawSpanCoverage]
-        }
-        var memo: [Int: ExactSpanChoice] = [:]
-
-        func solve(_ index: Int) -> ExactSpanChoice {
-            if index >= characters.count {
-                return ExactSpanChoice(score: 0, coveredLength: 0, coverages: [])
-            }
-            if let cached = memo[index] { return cached }
-            var best = solve(index + 1)
+        // 每個位置只保存分數、覆蓋長度與下一條邊，最後回溯一次完整路徑。
+        // 平手仍依序比較覆蓋長度與片段數，完全相同時保留原先選擇。
+        var scores = Array(repeating: 0, count: characters.count + 1)
+        var coveredLengths = scores
+        var counts = scores
+        var choices: [RawSpanCoverage?] = Array(repeating: nil, count: characters.count)
+        for index in characters.indices.reversed() {
+            scores[index] = scores[index + 1]
+            coveredLengths[index] = coveredLengths[index + 1]
+            counts[index] = counts[index + 1]
             for coverage in candidatesByStart[index] ?? [] {
                 let length = coverage.end - coverage.start
-                let tail = solve(coverage.end)
-                let candidate = ExactSpanChoice(
-                    score: length * length + tail.score,
-                    coveredLength: length + tail.coveredLength,
-                    coverages: [coverage] + tail.coverages
-                )
-                if candidate.score > best.score
-                    || (candidate.score == best.score && candidate.coveredLength > best.coveredLength)
-                    || (candidate.score == best.score
-                        && candidate.coveredLength == best.coveredLength
-                        && candidate.coverages.count < best.coverages.count) {
-                    best = candidate
+                let score = length * length + scores[coverage.end]
+                let covered = length + coveredLengths[coverage.end]
+                let count = 1 + counts[coverage.end]
+                if score > scores[index]
+                    || (score == scores[index] && covered > coveredLengths[index])
+                    || (score == scores[index] && covered == coveredLengths[index] && count < counts[index]) {
+                    scores[index] = score
+                    coveredLengths[index] = covered
+                    counts[index] = count
+                    choices[index] = coverage
                 }
             }
-            memo[index] = best
-            return best
         }
-
-        return solve(0).coverages
+        var result: [RawSpanCoverage] = []
+        result.reserveCapacity(counts[0])
+        var index = 0
+        while index < characters.count {
+            if let coverage = choices[index] {
+                result.append(coverage)
+                index = coverage.end
+            } else { index += 1 }
+        }
+        return result
     }
 
     private static func cachedEnglishCoverageCandidates(
         in rawBuffer: String,
         englishTargetID: String
     ) -> [RawSpanCoverage] {
-        englishCoverageCacheLock.lock()
-        if let cached = englishCoverageCandidateCache[rawBuffer] {
-            englishCoverageCacheOrder.removeAll { $0 == rawBuffer }
-            englishCoverageCacheOrder.append(rawBuffer)
-            englishCoverageCacheLock.unlock()
+        if let cached = englishCoverageCandidateCache.value(for: rawBuffer) {
             return cached
         }
         let previousBuffer = String(rawBuffer.dropLast())
-        let previousCandidates = englishCoverageCandidateCache[previousBuffer]
-        englishCoverageCacheLock.unlock()
+        let previousCandidates = englishCoverageCandidateCache.value(for: previousBuffer)
 
         let characters = Array(rawBuffer)
         // Exact spans remain valid when the buffer grows. A provisional span
@@ -524,15 +499,7 @@ enum MixedCompositionResolver {
             }
         }
 
-        englishCoverageCacheLock.lock()
-        englishCoverageCandidateCache[rawBuffer] = result
-        englishCoverageCacheOrder.removeAll { $0 == rawBuffer }
-        englishCoverageCacheOrder.append(rawBuffer)
-        while englishCoverageCacheOrder.count > englishCoverageCacheCapacity {
-            let evicted = englishCoverageCacheOrder.removeFirst()
-            englishCoverageCandidateCache.removeValue(forKey: evicted)
-        }
-        englishCoverageCacheLock.unlock()
+        englishCoverageCandidateCache.store(result, for: rawBuffer)
         return result
     }
 

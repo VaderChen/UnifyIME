@@ -21,6 +21,7 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 | `Sources/IME/Models/SymbolCandidates.swift` | 標點快捷鍵與同類符號候選 |
 | `Sources/IME/Models/LanguageTypes.swift` | 來源按鍵範圍、確認狀態與候選身分 |
 | `Sources/IME/Models/MixedMergeSupport.swift` | 中英來源範圍對齊與局部合併 |
+| `Sources/IME/Models/BoundedLRUCache.swift` | 有界且加鎖的共用 LRU 快取 |
 | `../phoneticIME/Sources/PhoneticIMEEngine.swift` | 注音音節、選字鎖定與上下文保留 |
 | `../englishIME/Sources/EnglishIMEEngine.swift` | 英文單字、未完成前綴與候選 |
 | `Sources/IME/Segmentation/ReadingWalker.swift` | 詞庫切分、完整詞與功能字計分 |
@@ -88,6 +89,16 @@ UnifyIME 的正式程式位於 `src/unifyIME`，中文與英文引擎分別位�
 
 `SymbolCandidates` 統一管理符號候選與同類變體。符號保留在共用組字狀態內，候選沿用既有替換與復原流程；尚未提交前，可移回符號位置重新選取。Shift 符號輸入依鍵盤產生的字元查詢對照表，再透過共用組字流程插入。
 
+## 效能與記憶體
+
+英文詞條只保存一份，精確與前綴索引保存編號；中文詞庫共用不可變字詞表、前綴、單字讀音與詞頻統計，覆寫及候選快取仍按實例隔離。`BoundedLRUCache` 以字典與雙向鏈結提供平均 O(1) 查詢、更新及淘汰，保留各使用處原有的容量上限，反向鏈結以弱參照避免循環保留。
+
+`CandidateTopK` 在只需要前 K 名時使用有界 heap，保留分數、baseRank 與輸入順序的平手規則；需要全部候選時沿用完整排序。中英區段 DP 保存分數及下一條邊，最後一次回溯，避免每個狀態都保存完整路徑。候選來源標註在一次畫面更新中共用來源字元的前綴和，減少重掃。
+
+特徵編碼保留 88 維、24 維及 listwise 張量的座標與數值契約，減少中間陣列；即時 listwise 排序仍關閉。個人詞頻透過巢狀字典可變存取更新，保留鎖定與持久化規則；MCP 詞彙批次一次移除受影響身分，再按原順序加入。關閉診斷時，記錄訊息不求值。
+
+App 與 CLI 的 `--release` 均使用 `-O -whole-module-optimization`，`--debug` 使用 `-Onone`。比較演算法前後效能時應使用相同編譯模式、詞庫、模型及資料，避免把編譯設定差異混入結果。固定工作負載與 RSS 限制見下方兩份最佳化報告。
+
 ## 模型與設定
 
 已訓練模型位於 [models](../models/README.md)。Core ML 模型不可用時，排序會回退至規則式結果。模型輸入維度須與程式的特徵編碼一致。
@@ -106,6 +117,9 @@ CLI 模擬器的左右鍵會先提交組字，與原生 SessionCtl 在組字內�
 
 | 紀錄 | 範圍 |
 | --- | --- |
+| [函式級最佳化](函式級效能與記憶體最佳化_20261003.md) | 838 個函式宣告盤點、候選選取、詞頻、特徵、分詞及前後契約比對 |
+| [整體最佳化](效能與記憶體最佳化_20261003.md) | 詞庫共用、LRU、release 編譯與整體耗時／RSS |
+| [發布驗證](發布驗證_20261003.md) | 1.26.1003 build 2300 的安裝、簽章、公證與封裝 Smoke |
 | [省略聲調整詞補救](省略聲調整詞補救_20260921.md) | 「區消」問題、完整詞召回、低頻誤改防護與驗證 |
 | [五輪組字選字修正](組字選字五輪檢查與修正_20260921.md) | 游標前進、重選鎖定、詞頻保存、快取隔離與詞內插入 |
 | [組字選字策略修正](組字選字策略檢查與修正_20260921.md) | 第一聲末音節、完整左文、批次評分及分詞查詢 |
@@ -116,12 +130,16 @@ CLI 模擬器的左右鍵會先提交組字，與原生 SessionCtl 在組字內�
 在專案根目錄執行隔離 Smoke，不安裝或切換正式輸入法：
 
 ```sh
-python3 src/unifyIME/scripts/native_event_smoke.py
+python3 src/unifyIME/scripts/native_event_smoke.py --release
 python3 src/unifyIME/scripts/native_event_smoke.py --strategy-only
 UNIFYIME_STRATEGY_ROUND=3 python3 src/unifyIME/scripts/native_event_smoke.py --strategy-only
+python3 src/unifyIME/scripts/performance_smoke.py --functions-only --runs 3
+python3 src/unifyIME/scripts/performance_smoke.py --runs 3
 ```
 
 完整執行包含 62 項策略檢查與 394 個原生事件案例；`--strategy-only` 只跑策略，`UNIFYIME_STRATEGY_ROUND` 可選 1 至 6，第 6 組為省略聲調補救。產物路徑由程式印出，可用 `--output-dir` 指定。測試建立獨立資料及偏好 suite，並停用 Core ML 模型；準確率結果須在相同資料及模型設定下比較。本機產物、個人資料與未發布的研究工具不隨 GitHub 同步。
+
+效能探針預設使用 release。`--functions-only` 執行函式工作負載，預設模式執行完整詞庫契約與逐鍵混打；可用 `--source-root` 指定 Swift 來源快照、`--compare-with` 比對相同情境的摘要，或以 `--build-only`／`--skip-build` 分開建置及量測。`check.sh` 另包含 LRU Smoke，檢查淘汰、空結果、資料釋放與並行存取。
 
 ## 發布與安裝程式
 

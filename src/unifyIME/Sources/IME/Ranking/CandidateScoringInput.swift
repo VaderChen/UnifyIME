@@ -7,41 +7,46 @@ struct CandidateScoringInput {
 
     static func make(matches: [LexiconStore.CompositionMatch], tokens: [InputToken], start: Int,
                      length: Int, precedingValues: [String]) -> CandidateScoringInput? {
-        guard let input = make(candidates: matches.map(\.surface), tokens: tokens, start: start,
-                               length: length, precedingValues: precedingValues) else { return nil }
-        let units = zip(input.units, matches).map { unit, match -> CandidateUnit in
-            var result = unit
-            if match.inferredToneCount > 0 {
-                result.lexiconReading = match.reading
-                result.inferredToneCount = match.inferredToneCount
-            }
-            return result
+        guard let context = makeContext(tokens: tokens, start: start, length: length,
+            precedingValues: precedingValues) else { return nil }
+        let units = matches.enumerated().map { rank, match in
+            CandidateUnit(languageID: context.languageID, surface: match.surface,
+                readingOrToken: context.combinedToken, spanStart: min(start, 3), spanLength: length,
+                providerScore: Double(-rank), baseRank: rank,
+                lexiconReading: match.inferredToneCount > 0 ? match.reading : nil,
+                inferredToneCount: max(0, match.inferredToneCount))
         }
-        return CandidateScoringInput(units: units, context: input.context)
+        return CandidateScoringInput(units: units, context: context)
     }
 
     static func make(candidates: [String], tokens: [InputToken], start: Int,
                      length: Int, precedingValues: [String]) -> CandidateScoringInput? {
+        guard let context = makeContext(tokens: tokens, start: start, length: length,
+            precedingValues: precedingValues) else { return nil }
+        let units = candidates.enumerated().map { rank, value in
+            CandidateUnit(languageID: context.languageID, surface: value, readingOrToken: context.combinedToken,
+                spanStart: min(start, 3), spanLength: length, providerScore: Double(-rank), baseRank: rank)
+        }
+        return CandidateScoringInput(units: units, context: context)
+    }
+
+    private static func makeContext(tokens: [InputToken], start: Int, length: Int,
+                                    precedingValues: [String]) -> CandidateSelectionContext? {
         guard length > 0, start >= 0, start <= tokens.count,
               length <= tokens.count - start else { return nil }
         let end = start + length
         let lower = max(0, start - 3)
         let upper = min(tokens.count, end + 3)
-        let reading = tokens[start..<end].map(\.rawValue).joined()
+        let reading = tokens[start..<end].lazy.map(\.rawValue).joined(separator: "")
         let language = tokens[start].languageID
-        let prefix = Array(precedingValues.filter { !$0.isEmpty }.suffix(3))
+        let prefix = Array(precedingValues.reversed().lazy.filter { !$0.isEmpty }.prefix(3).reversed())
         var context = CandidateSelectionContext(languageID: language,
             allTokens: Array(tokens[lower..<upper]), combinedToken: reading, spanLength: length,
             precedingValues: prefix,
             followingTokens: Array(tokens[end..<upper]), focusedToken: reading)
         context.legacyModelCoordinates = LegacyModelCoordinates(tokenCount: tokens.count, spanStart: start,
             followingTokens: Array(tokens[end..<min(tokens.count, end + 6)]))
-        let units = candidates.enumerated().map { rank, value in
-            CandidateUnit(languageID: language, surface: value, readingOrToken: reading,
-                spanStart: start - lower, spanLength: length,
-                providerScore: Double(-rank), baseRank: rank)
-        }
-        return CandidateScoringInput(units: units, context: context)
+        return context
     }
 
     static func precedingValues(segments: [ComposedSegment], before index: Int) -> [String] {

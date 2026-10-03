@@ -56,10 +56,9 @@ enum PersonalVocabularyStore {
         var document = try read()
         guard document.revision == revision else { throw failure("資料已更新，請重新查詢 revision 再修改。") }
         let before = document
-        for change in changes {
-            document.entries.removeAll { $0.reading == change.entry.reading && $0.surface == change.entry.surface }
-            if !change.remove { document.entries.append(change.entry) }
-        }
+        // 同批身分已驗證不重複，一次移除即可保留原本逐筆替換的最終順序。
+        document.entries.removeAll { identities.contains($0.reading + "\t" + $0.surface) }
+        for change in changes where !change.remove { document.entries.append(change.entry) }
         guard document.entries.count <= 10_000 else { throw failure("個人詞彙上限為 10000 筆。") }
         if dryRun { return (document, before) }
         document.revision += 1
@@ -93,7 +92,10 @@ enum PersonalVocabularyStore {
         let custom = entries(reading: reading)
         guard !custom.isEmpty else { return base }
         var seen = Set<String>()
-        let merged = (base + custom.map(\.surface)).filter { seen.insert($0).inserted }
+        var merged: [String] = []
+        merged.reserveCapacity(base.count + custom.count)
+        for surface in base where seen.insert(surface).inserted { merged.append(surface) }
+        for entry in custom where seen.insert(entry.surface).inserted { merged.append(entry.surface) }
         return merged
     }
 

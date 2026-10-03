@@ -62,8 +62,7 @@ struct HeuristicCandidateRanker: UnifiedCandidateRanker {
             if counts[key] == nil {
                 counts[key] = UserFrequencyStore.frequencyMap(languageID: key.language, reading: key.reading)
                 preferences[key] = key.language == "zh-Hant"
-                    ? Dictionary(PersonalVocabularyStore.entries(reading: key.reading).map { ($0.surface, $0.priority) },
-                        uniquingKeysWith: { _, new in new }) : [:]
+                    ? PersonalVocabularyStore.entries(reading: key.reading).reduce(into: [:]) { $0[$1.surface] = $1.priority } : [:]
             }
             return score(unit: unit, count: counts[key]?[unit.surface] ?? 0,
                 preference: Double(preferences[key]?[unit.surface] ?? 0))
@@ -78,10 +77,11 @@ struct HeuristicCandidateRanker: UnifiedCandidateRanker {
         // 同音排序只在此計分，呼叫端不得再加使用紀錄或個人偏好。
         let lexiconReading = unit.lexiconReading ?? unit.readingOrToken
         let weight = Self.phraseStats.readingSurfaceWeights[lexiconReading]?[unit.surface] ?? 0
-        let corpusBonus = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
+        let matchesSpan = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
+        let corpusBonus = matchesSpan
             && unit.spanLength > 1 && weight.isFinite && weight > 0
             ? min(log10(weight + 1.0) * 120.0, 500.0) * Double(unit.spanLength) : 0.0
-        let calibration = unit.languageID == "zh-Hant" && unit.surface.count == unit.spanLength
+        let calibration = matchesSpan
             ? Self.spanCalibration[lexiconReading]?[unit.spanLength] ?? 0 : 0
         // 每補出一個聲調均有成本，不能把近似整詞當成精確讀音命中。
         let toneCost = Double(unit.inferredToneCount) * 120.0

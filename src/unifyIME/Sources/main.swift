@@ -1626,7 +1626,9 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     private var allReadings: [String] {
-        readings + trailingReadings
+        if trailingReadings.isEmpty { return readings }
+        if readings.isEmpty { return trailingReadings }
+        return readings + trailingReadings
     }
 
     private var joinedReading: String {
@@ -2037,9 +2039,13 @@ final class SessionCtl: IMKInputController, CandidateSelectionHandler {
     }
 
     static func mapKeySequence(_ chars: String) -> String? {
-        let mapped = chars.compactMap { bopomofoMap[String($0)] }
-        guard !mapped.isEmpty, mapped.count == chars.count else { return nil }
-        return mapped.joined()
+        guard !chars.isEmpty else { return nil }
+        var mapped = ""
+        for character in chars {
+            guard let symbol = bopomofoMap[String(character)] else { return nil }
+            mapped += symbol
+        }
+        return mapped
     }
 
     static func resolveCandidates(for buffer: String) -> [String] {

@@ -79,14 +79,20 @@ final class BasicCandidatePanelController: NSWindowController {
                 height: bounds.height - (verticalPadding * 2)
             ).fill()
 
+            let numberAttrs: [NSAttributedString.Key: Any] = [
+                .font: numberFont,
+                .foregroundColor: NSColor.tertiaryLabelColor
+            ]
+
+            let contentAttrs: [NSAttributedString.Key: Any] = [
+                .font: contentFont,
+                .foregroundColor: NSColor.labelColor
+            ]
+
             for (offset, value) in candidates.enumerated() {
                 let absoluteIndex = rowStartIndex + offset
                 let rowY = verticalPadding + (CGFloat(offset) * lineHeight)
 
-                let numberAttrs: [NSAttributedString.Key: Any] = [
-                    .font: numberFont,
-                    .foregroundColor: NSColor.tertiaryLabelColor
-                ]
                 let numberText = NSString(string: "\(absoluteIndex + 1)")
                 let numberSize = numberText.size(withAttributes: numberAttrs)
                 numberText.draw(
@@ -113,10 +119,6 @@ final class BasicCandidatePanelController: NSWindowController {
                     )
                 }
 
-                let contentAttrs: [NSAttributedString.Key: Any] = [
-                    .font: contentFont,
-                    .foregroundColor: NSColor.labelColor
-                ]
                 NSString(string: value).draw(
                     at: CGPoint(x: contentColumnLeading, y: rowY),
                     withAttributes: contentAttrs
@@ -211,9 +213,9 @@ final class BasicCandidatePanelController: NSWindowController {
         let visibleCandidates = Array(candidates[startIndex..<(startIndex + visibleCount)])
         let font = listView.contentFont
         let valueAttrs: [NSAttributedString.Key: Any] = [.font: font]
-        let valueWidest = visibleCandidates
-            .map { ceil(($0 as NSString).size(withAttributes: valueAttrs).width) }
-            .max() ?? 80
+        let valueWidest = visibleCandidates.reduce(CGFloat(0)) { widest, value in
+            max(widest, ceil((value as NSString).size(withAttributes: valueAttrs).width))
+        }
         let lineHeight = ceil(font.ascender - font.descender) + 1
         let height = CGFloat(max(visibleCount, 4)) * lineHeight + (verticalPadding * 2) + 2
         let width = min(max(contentColumnLeading + valueWidest + horizontalPadding + 2, 110), 172)

@@ -24,11 +24,9 @@ struct TraditionalChineseProvider: LanguageProvider {
         var reverse: [String: [String]] = [:]
         func add(_ text: String, reading: String) {
             guard !text.isEmpty, !reading.isEmpty else { return }
-            var list = reverse[text, default: []]
-            if !list.contains(reading) {
-                list.append(reading)
+            if !(reverse[text]?.contains(reading) ?? false) {
+                reverse[text, default: []].append(reading)
             }
-            reverse[text] = list
         }
         for reading in lexicon.phraseCandidateMap.keys.sorted() {
             let phrases = lexicon.phraseCandidateMap[reading] ?? []

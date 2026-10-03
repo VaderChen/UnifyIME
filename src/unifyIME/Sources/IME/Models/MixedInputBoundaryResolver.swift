@@ -11,31 +11,36 @@ enum MixedInputBoundaryResolver {
     }
 
     static func isASCIIAlpha(_ token: String) -> Bool {
-        guard token.count == 1, let scalar = token.unicodeScalars.first else { return false }
+        guard !token.isEmpty, token.index(after: token.startIndex) == token.endIndex,
+              let scalar = token.unicodeScalars.first else { return false }
         return scalar.isASCII && CharacterSet.letters.contains(scalar)
     }
 
     static func resolve(run: String, boundary: String) -> MixedInputBoundaryResolution? {
         guard !run.isEmpty else { return nil }
 
-        if isExplicitEnglishBoundary(boundary), isExactEnglishWord(run) {
+        let exactRun = isExactEnglishWord(run)
+        if isExplicitEnglishBoundary(boundary), exactRun {
             return MixedInputBoundaryResolution(englishCommit: run, primaryToken: nil)
         }
 
-        let chars = Array(run)
-        for split in stride(from: chars.count, through: 0, by: -1) {
-            let englishPart = String(chars.prefix(split))
-            let primaryPart = String(chars.dropFirst(split)) + boundary
-            let englishOK = englishPart.isEmpty || isExactEnglishWord(englishPart)
-            guard englishOK else { continue }
-            guard primaryMaterializes(token: primaryPart) else { continue }
-            return MixedInputBoundaryResolution(
-                englishCommit: englishPart.isEmpty ? nil : englishPart,
-                primaryToken: primaryPart
-            )
+        var split = run.endIndex
+        while true {
+            // 按字元邊界向前走，保留 Unicode 行為，且只為合格前綴建立後綴。
+            let englishPart = String(run[..<split])
+            let englishOK = englishPart.isEmpty || (split == run.endIndex ? exactRun : isExactEnglishWord(englishPart))
+            if englishOK {
+                let primaryPart = String(run[split...]) + boundary
+                if primaryMaterializes(token: primaryPart) {
+                    return MixedInputBoundaryResolution(englishCommit: englishPart.isEmpty ? nil : englishPart,
+                        primaryToken: primaryPart)
+                }
+            }
+            guard split > run.startIndex else { break }
+            split = run.index(before: split)
         }
 
-        if isExactEnglishWord(run) {
+        if exactRun {
             return MixedInputBoundaryResolution(englishCommit: run, primaryToken: nil)
         }
 
@@ -58,11 +63,11 @@ enum MixedInputBoundaryResolver {
         guard !token.isEmpty else { return false }
         var state = UnifiedCompositionState()
         CompositionLanguageRegistry.primary.feed(token: token, state: &state)
+        if state.hasComposition { return true }
         let prediction = CompositionLanguageRegistry.primary.predict(state)
         return !prediction.presentation.markedText.isEmpty
             || !prediction.presentation.displayedSegments.isEmpty
             || !prediction.presentation.candidateEntries.isEmpty
-            || state.hasComposition
     }
 
     private static func isExplicitEnglishBoundary(_ token: String) -> Bool {

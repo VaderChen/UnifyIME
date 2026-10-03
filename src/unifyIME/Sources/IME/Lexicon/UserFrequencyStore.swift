@@ -20,15 +20,13 @@ enum UserFrequencyStore {
         guard shouldTrack(languageID) else { return }
         let key = reading.lowercased()
         lock.lock()
-        var langMap = cache[languageID] ?? loadFromDisk(languageID: languageID)
-        var entries = langMap[key] ?? []
-        if let idx = entries.firstIndex(where: { $0.surface == surface }) {
-            entries[idx].count += 1
+        if cache[languageID] == nil { cache[languageID] = loadFromDisk(languageID: languageID) }
+        // 經由字典的可變存取器更新，避免每次選字複製整個語言的詞頻表。
+        if let idx = cache[languageID]?[key]?.firstIndex(where: { $0.surface == surface }) {
+            cache[languageID, default: [:]][key, default: []][idx].count += 1
         } else {
-            entries.append((surface: surface, count: 1))
+            cache[languageID, default: [:]][key, default: []].append((surface: surface, count: 1))
         }
-        langMap[key] = entries
-        cache[languageID] = langMap
         dirty.insert(languageID)
         revisions[languageID, default: 0] &+= 1
         scheduleFlushLocked()
@@ -39,22 +37,26 @@ enum UserFrequencyStore {
     /// Returns 0 if no history.
     static func frequency(languageID: String, reading: String, surface: String) -> Int {
         guard shouldTrack(languageID) else { return 0 }
-        return frequencyMap(languageID: languageID, reading: reading)[surface] ?? 0
+        return entries(languageID: languageID, reading: reading).reduce(0) { count, entry in
+            entry.surface == surface ? max(count, entry.count) : count
+        }
     }
 
     /// Batch lookup: returns [surface: count] for a given reading. Single lock acquisition.
     static func frequencyMap(languageID: String, reading: String) -> [String: Int] {
         guard shouldTrack(languageID) else { return [:] }
+        return entries(languageID: languageID, reading: reading).reduce(into: [:]) { result, entry in
+            result[entry.surface] = max(result[entry.surface] ?? 0, entry.count)
+        }
+    }
+
+    private static func entries(languageID: String, reading: String) -> [(surface: String, count: Int)] {
         let key = reading.lowercased()
         lock.lock()
-        let langMap = cache[languageID] ?? {
-            let loaded = loadFromDisk(languageID: languageID)
-            cache[languageID] = loaded
-            return loaded
-        }()
-        lock.unlock()
-        guard let entries = langMap[key] else { return [:] }
-        return Dictionary(entries.map { ($0.surface, $0.count) }, uniquingKeysWith: max)
+        defer { lock.unlock() }
+        if cache[languageID] == nil { cache[languageID] = loadFromDisk(languageID: languageID) }
+        // 鎖外只保留該讀音的資料，避免讓其他讀音的更新觸發整張表的 COW。
+        return cache[languageID]?[key] ?? []
     }
 
     /// Reorder candidates by boosting user-preferred ones to the top.

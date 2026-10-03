@@ -4,27 +4,24 @@ private struct EnglishLexiconEntry {
     let normalized: String
     let surface: String
     let weight: Int
-    let translation: String
 }
 
 private enum EnglishLexiconStore {
-    private static let lock = NSLock()
-    private static var cachedEntries: [EnglishLexiconEntry]?
-    private static var cachedExactMap: [String: [EnglishLexiconEntry]]?
-    private static var cachedPrefixMap: [String: [EnglishLexiconEntry]]?
+    private struct Index {
+        let entries: [EnglishLexiconEntry]
+        let exact: [String: [Int]]
+        let prefixes: [String: [Int]]
+    }
+    // Swift 的 static let 只初始化一次；不可變索引不需要逐次查詢加鎖。
+    // 完整詞條只保存一份，精確與前綴索引僅保存編號。
+    private static let index = loadIndex()
 
     static func entries() -> [EnglishLexiconEntry] {
-        lock.lock()
-        defer { lock.unlock() }
-        if let cachedEntries, let cachedExactMap, let cachedPrefixMap {
-            _ = cachedExactMap
-            _ = cachedPrefixMap
-            return cachedEntries
-        }
+        index.entries
+    }
 
+    private static func loadIndex() -> Index {
         var loadedEntries: [EnglishLexiconEntry] = []
-        var exactMap: [String: [EnglishLexiconEntry]] = [:]
-        var prefixMap: [String: [EnglishLexiconEntry]] = [:]
 
         if let url = resourceURL(named: "english_words", ext: "tsv"),
            let text = try? String(contentsOf: url, encoding: .utf8) {
@@ -34,21 +31,13 @@ private enum EnglishLexiconStore {
                 let normalized = String(parts[0])
                 let surface = String(parts[1])
                 let weight = Int(parts[2]) ?? 0
-                let translation = String(parts[3])
                 guard !normalized.isEmpty, !surface.isEmpty else { continue }
                 let entry = EnglishLexiconEntry(
                     normalized: normalized,
                     surface: surface,
-                    weight: weight,
-                    translation: translation
+                    weight: weight
                 )
                 loadedEntries.append(entry)
-                exactMap[normalized, default: []].append(entry)
-                if normalized.count > 1 {
-                    for i in 1..<normalized.count {
-                        prefixMap[String(normalized.prefix(i)), default: []].append(entry)
-                    }
-                }
             }
         }
 
@@ -57,40 +46,35 @@ private enum EnglishLexiconStore {
             if lhs.normalized != rhs.normalized { return lhs.normalized < rhs.normalized }
             return lhs.surface < rhs.surface
         }
-        for key in exactMap.keys {
-            exactMap[key]?.sort { lhs, rhs in
-                if lhs.weight != rhs.weight { return lhs.weight > rhs.weight }
-                return lhs.surface < rhs.surface
+        var exactMap: [String: [Int]] = [:]
+        var prefixMap: [String: [Int]] = [:]
+        for (entryID, entry) in loadedEntries.enumerated() {
+            exactMap[entry.normalized, default: []].append(entryID)
+            var prefix = ""
+            for character in entry.normalized.dropLast() {
+                prefix.append(character)
+                prefixMap[prefix, default: []].append(entryID)
             }
         }
-        for key in prefixMap.keys {
-            prefixMap[key]?.sort { lhs, rhs in
-                if lhs.weight != rhs.weight { return lhs.weight > rhs.weight }
-                if lhs.normalized != rhs.normalized { return lhs.normalized < rhs.normalized }
-                return lhs.surface < rhs.surface
-            }
-        }
-
-        cachedEntries = loadedEntries
-        cachedExactMap = exactMap
-        cachedPrefixMap = prefixMap
-        return loadedEntries
+        // 全域排序與各索引使用同一順位，無須逐前綴再次排序。
+        return Index(entries: loadedEntries, exact: exactMap, prefixes: prefixMap)
     }
 
-    static func exactCandidates(for normalized: String) -> [EnglishLexiconEntry] {
-        _ = entries()
-        return cachedExactMap?[normalized] ?? []
+    static func exactCandidates(for normalized: String) -> LazyMapSequence<[Int], EnglishLexiconEntry> {
+        (index.exact[normalized] ?? []).lazy.map { index.entries[$0] }
     }
 
-    static func prefixCandidates(for normalized: String, limit: Int = 20) -> [EnglishLexiconEntry] {
-        guard !normalized.isEmpty else { return [] }
-        _ = entries()
-        return Array((cachedPrefixMap?[normalized] ?? []).prefix(limit))
+    static func prefixCandidates(for normalized: String, limit: Int = 20) -> LazyMapSequence<ArraySlice<Int>, EnglishLexiconEntry> {
+        let ids = normalized.isEmpty ? [] : (index.prefixes[normalized] ?? [])
+        return ids.prefix(max(0, limit)).lazy.map { index.entries[$0] }
+    }
+
+    static func hasExactCandidates(for normalized: String) -> Bool {
+        index.exact[normalized] != nil
     }
 
     static func canExtend(prefix normalized: String) -> Bool {
-        _ = entries()
-        return cachedPrefixMap?[normalized] != nil
+        index.prefixes[normalized] != nil
     }
 
     static func exactSurfaceMatches(for normalized: String, surface: String) -> Bool {
@@ -141,7 +125,7 @@ private func normalizeEnglishToken(_ token: String) -> String {
 
 private func isViableEnglishReading(_ normalized: String) -> Bool {
     guard !normalized.isEmpty else { return false }
-    if !EnglishLexiconStore.exactCandidates(for: normalized).isEmpty { return true }
+    if EnglishLexiconStore.hasExactCandidates(for: normalized) { return true }
     if EnglishLexiconStore.canExtend(prefix: normalized) { return true }
     if inflectionBase(for: normalized) != nil { return true }
     return false
@@ -149,7 +133,7 @@ private func isViableEnglishReading(_ normalized: String) -> Bool {
 
 private func isExactEnglishReading(_ normalized: String) -> Bool {
     guard !normalized.isEmpty else { return false }
-    if !EnglishLexiconStore.exactCandidates(for: normalized).isEmpty { return true }
+    if EnglishLexiconStore.hasExactCandidates(for: normalized) { return true }
     if inflectionBase(for: normalized) != nil { return true }
     return false
 }
@@ -158,7 +142,7 @@ private func inflectionBase(for normalized: String) -> String? {
     guard normalized.count > 1 else { return nil }
     if normalized.hasSuffix("s") {
         let base = String(normalized.dropLast())
-        if !EnglishLexiconStore.exactCandidates(for: base).isEmpty {
+        if EnglishLexiconStore.hasExactCandidates(for: base) {
             return base
         }
     }
@@ -178,7 +162,7 @@ struct EnglishIMEEngine: CompositionLanguageBehavior {
     static func exactSurfaceCandidates(for token: String) -> [String] {
         let normalized = normalizeEnglishToken(token)
         guard !normalized.isEmpty else { return [] }
-        return EnglishLexiconStore.exactCandidates(for: normalized).map(\.surface)
+        return Array(EnglishLexiconStore.exactCandidates(for: normalized).map(\.surface))
     }
 
     static func canExtendToken(_ token: String) -> Bool {
@@ -365,11 +349,9 @@ struct EnglishIMEEngine: CompositionLanguageBehavior {
         let entries = EnglishLexiconStore.entries()
         var result: [String: [String]] = [:]
         for entry in entries {
-            var values = result[entry.surface, default: []]
-            if !values.contains(entry.normalized) {
-                values.append(entry.normalized)
+            if !(result[entry.surface]?.contains(entry.normalized) ?? false) {
+                result[entry.surface, default: []].append(entry.normalized)
             }
-            result[entry.surface] = values
         }
         return result
     }

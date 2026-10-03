@@ -71,7 +71,9 @@ esac
 TARGET_TRIPLE="$HOST_ARCH-apple-macos$MACOS_TARGET"
 SWIFT_FLAGS=()
 if [[ "$SWIFT_CONFIGURATION" == "debug" ]]; then
-  SWIFT_FLAGS+=(-D DEBUG)
+  SWIFT_FLAGS+=(-Onone -D DEBUG)
+else
+  SWIFT_FLAGS+=(-O -whole-module-optimization)
 fi
 
 remove_stale_input_methods() {

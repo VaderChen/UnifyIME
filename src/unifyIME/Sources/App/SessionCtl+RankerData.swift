@@ -41,7 +41,7 @@ extension SessionCtl {
                 guard spanLength > 0 else { continue }
 
                 let tokens = allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
-                let prefix = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
+                let prefix = segments.prefix(segmentIndex).suffix(3).map(\.text)
                 guard let input = traditionalChineseProvider.readingWalker.inputForSpan(tokens,
                     start: tokenCursor, length: spanLength, precedingValues: prefix) else {
                     tokenCursor += spanLength
@@ -130,9 +130,7 @@ extension SessionCtl {
         for reading in groupedReadings {
             let candidates = resolveCandidates(for: reading)
             guard let matched = candidates.first(where: { candidate in
-                let candidateChars = Array(candidate)
-                guard cursor + candidateChars.count <= chars.count else { return false }
-                return Array(chars[cursor..<(cursor + candidateChars.count)]) == candidateChars
+                chars[cursor...].starts(with: candidate)
             }) else {
                 return nil
             }
@@ -531,7 +529,7 @@ extension SessionCtl {
             let spanTokens = splitReadingIntoSyllables(segment.reading)
             let spanLength = spanTokens.count
             guard spanLength > 0 else { continue }
-            let prefix = Array(segments.prefix(segmentIndex).map(\.text).suffix(3))
+            let prefix = segments.prefix(segmentIndex).suffix(3).map(\.text)
             let tokens = allTokens.map { InputToken(languageID: traditionalChineseProvider.languageID, rawValue: $0) }
             guard let input = traditionalChineseProvider.readingWalker.inputForSpan(tokens,
                 start: tokenCursor, length: spanLength, precedingValues: prefix), !input.units.isEmpty else {

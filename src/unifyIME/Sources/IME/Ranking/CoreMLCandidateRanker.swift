@@ -4,7 +4,9 @@ import Foundation
 struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     private let fallback = HeuristicCandidateRanker()
     private let encoder = RankingFeatureEncoder()
-    private let predictionCache = CandidatePredictionCache()
+    private let predictionCache = BoundedLRUCache<[Double], Double>(capacity: 512)
+    private let configuredOutputOnly: Bool
+    private let scoreScale: Double
     private let model: MLModel?
     private let resolvedModelPath: String?
     private let resolvedComputeUnits: MLComputeUnits?
@@ -20,6 +22,10 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
 
     init(modelName: String = "CandidateRanker") {
         let env = ProcessInfo.processInfo.environment
+        configuredOutputOnly = env["UNIFYIME_COREML_ONLY_RANKER"] == "1"
+            || env["FASTCHIME_COREML_ONLY_RANKER"] == "1"
+        let scale = env["UNIFYIME_COREML_SCORE_SCALE"].flatMap(Double.init) ?? 160.0
+        scoreScale = scale.isFinite ? min(max(0.0, scale), 160.0) : 160.0
         if env["UNIFYIME_DISABLE_COREML_RANKER"] == "1" || env["FASTCHIME_DISABLE_COREML_RANKER"] == "1" {
             model = nil
             resolvedModelPath = nil
@@ -67,11 +73,13 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
 
     func score(unit: CandidateUnit, context: CandidateSelectionContext) -> Double {
         let heuristicScore = fallback.score(unit: unit, context: context)
-        let engineMode = currentCandidateEngineMode
-        let processEnv = ProcessInfo.processInfo.environment
-        let coreMLOutputOnly = processEnv["UNIFYIME_COREML_ONLY_RANKER"] == "1"
-            || processEnv["FASTCHIME_COREML_ONLY_RANKER"] == "1"
-            || engineMode == .aiDecides
+        return score(unit: unit, context: context, heuristicScore: heuristicScore,
+            engineMode: currentCandidateEngineMode)
+    }
+
+    private func score(unit: CandidateUnit, context: CandidateSelectionContext,
+                       heuristicScore: Double, engineMode: CandidateEngineMode) -> Double {
+        let coreMLOutputOnly = configuredOutputOnly || engineMode == .aiDecides
         if engineMode == .traditionalOnly {
             return heuristicScore
         }
@@ -111,48 +119,46 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
     }
 
     func scores(units: [CandidateUnit], context: CandidateSelectionContext) -> [Double] {
-        // 無模型或傳統模式共用批次查詢，避免每個同音候選重建詞頻表。
-        if model == nil || currentCandidateEngineMode == .traditionalOnly {
-            return fallback.scores(units: units, context: context)
+        // 有模型時同樣共用批次詞頻查詢，且沿用已算出的基礎分數。
+        let mode = currentCandidateEngineMode
+        let base = fallback.scores(units: units, context: context)
+        if model == nil || mode == .traditionalOnly {
+            return base
         }
-        return units.map { score(unit: $0, context: context) }
+        return zip(units, base).map { unit, heuristicScore in
+            score(unit: unit, context: context, heuristicScore: heuristicScore, engineMode: mode)
+        }
     }
 
     func ranked(units: [CandidateUnit], context: CandidateSelectionContext, limit: Int) -> [RankedCandidate] {
         guard limit > 0, !units.isEmpty else { return [] }
         let mode = currentCandidateEngineMode
-        let env = ProcessInfo.processInfo.environment
-        let onlyAI = mode == .aiDecides || env["UNIFYIME_COREML_ONLY_RANKER"] == "1"
-            || env["FASTCHIME_COREML_ONLY_RANKER"] == "1"
+        guard model != nil, mode != .traditionalOnly else {
+            return fallback.ranked(units: units, context: context, limit: limit)
+        }
+        let onlyAI = mode == .aiDecides || configuredOutputOnly
         // 純模型模式沒有可用的基礎分數上界，維持完整推論。
         if onlyAI && mode != .traditionalOnly {
-            return Array(zip(units, scores(units: units, context: context)).compactMap { unit, score in
-                score.isFinite ? RankedCandidate(unit: unit, score: score) : nil
-            }.sorted(by: candidateRanksBefore).prefix(limit))
+            var selection = CandidateTopK(limit: min(limit, units.count))
+            for (unit, value) in zip(units, scores(units: units, context: context)) {
+                selection.insert(RankedCandidate(unit: unit, score: value))
+            }
+            return selection.ranked()
         }
         let base = zip(units, fallback.scores(units: units, context: context)).map {
             RankedCandidate(unit: $0.0, score: $0.1)
         }.sorted(by: candidateRanksBefore)
-        guard model != nil, mode != .traditionalOnly else { return Array(base.prefix(limit)) }
         let bound = scoreScale * (mode == .traditionalPreferredAIAssist ? 0.35 : 1.0)
-        var selected: [RankedCandidate] = []
+        var selected = CandidateTopK(limit: min(limit, units.count))
         for candidate in base {
             // 只有連理論最高分也嚴格落後第 K 名時才停止；平手仍須評分。
-            if selected.count == limit, let last = selected.last,
-               candidate.score + bound < last.score { break }
-            let value = score(unit: candidate.unit, context: context)
+            if let cutoff = selected.cutoffScore, candidate.score + bound < cutoff { break }
+            let value = score(unit: candidate.unit, context: context,
+                heuristicScore: candidate.score, engineMode: mode)
             guard value.isFinite else { continue }
-            selected.append(RankedCandidate(unit: candidate.unit, score: value))
-            selected.sort(by: candidateRanksBefore)
-            if selected.count > limit { selected.removeLast() }
+            selected.insert(RankedCandidate(unit: candidate.unit, score: value))
         }
-        return selected
-    }
-
-    private var scoreScale: Double {
-        let configured = ProcessInfo.processInfo.environment["UNIFYIME_COREML_SCORE_SCALE"]
-            .flatMap(Double.init) ?? 160.0
-        return configured.isFinite ? min(max(0.0, configured), 160.0) : 160.0
+        return selected.ranked()
     }
 
     private func blendedScore(
@@ -261,26 +267,5 @@ struct CoreMLCandidateRanker: UnifiedCandidateRanker {
             return url
         }
         return nil
-    }
-}
-
-/// 每個模型實例獨立保存原始預測；不快取會隨個人紀錄改變的混合分數。
-private final class CandidatePredictionCache {
-    private let lock = NSLock()
-    private var values: [[Double]: Double] = [:]
-    private var order: [[Double]] = []
-    private let capacity = 512
-
-    func value(for key: [Double]) -> Double? {
-        lock.lock(); defer { lock.unlock() }
-        return values[key]
-    }
-
-    func store(_ value: Double, for key: [Double]) {
-        lock.lock(); defer { lock.unlock() }
-        guard values[key] == nil else { return }
-        if order.count >= capacity { values.removeValue(forKey: order.removeFirst()) }
-        order.append(key)
-        values[key] = value
     }
 }

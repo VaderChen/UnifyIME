@@ -35,6 +35,8 @@ zsh build.command
 
 預設建立 `bin/app/全一輸入法.app` 與 `dist/全一輸入法.app`，不更新系統輸入法。可明確加上 `--sign --deploy` 執行簽章及部署。`IMEConfig.json` 會隨 app 打包，目前 `candidateWindowLength` 預設為 6。
 
+發布及效能驗證使用 `zsh build.command --release`；CLI 使用 `zsh src/unifyIME/build_cli.sh --release`。兩者的 release 均加入 `-O -whole-module-optimization`，debug 使用 `-Onone`。預設建置仍為 debug，可用 `--release`／`--debug` 明確指定。`zsh src/unifyIME/check.sh --release` 會讓 App 與原生 Smoke 使用相同模式。
+
 ## 詞庫資源
 
 建置會打包目前的中文與英文 TSV 詞庫，並將 `lexicons/README.md` 複製為 app 內的 `Contents/Resources/Lexicon-Licenses.md`，保留來源與授權說明。一般建置不會連線重新下載或匯入詞庫。
@@ -61,6 +63,8 @@ DMG 內含「安裝全一輸入法.app」與安裝說明。安裝程式與掛載
 - `--no-build` 可使用 `dist/全一輸入法.app` 封裝，仍會重新簽署及公證。
 
 `UNIFYIME_SKIP_NOTARIZE=1` 僅用於本機封裝，產物檔名會標示 `LOCAL-ONLY`。舊的 `scripts/build-release-notarize.command` 是本機部署流程；正式 DMG 請使用根目錄 `pack.command`。
+
+已驗證的 release App 可用 `zsh pack.command --no-build --arch=arm64` 封裝，沿用 App 中的版本。執行前核對來源快照、建置模式、架構及 App 版號，先保存 `dist/` 中需要保留的歷史產物；封裝會清空該目錄。正式發布前須核對 DMG 內的輸入法與安裝程式版號、簽章、公證票根及 Gatekeeper 結果，並直接對封裝內程式執行 Smoke。完成 Git 提交後，Release 標籤指向同一份來源，附件包含 DMG 與 SHA-256 校驗檔。範例記錄見 [2026-10-03 發布驗證](發布驗證_20261003.md)。
 
 ## 應用程式內更新
 

@@ -100,9 +100,9 @@ enum CompositionPresentationBuilder {
             if insertionIndex <= nextTokenOffset {
                 let localTokenCount = max(0, insertionIndex - tokenOffset)
                 // 詞段尾端必須走到完整文字末尾；內部只落在完整字元邊界。
-                let localCharAdvance = localTokenCount >= segment.length
-                    ? segment.value.count : min(segment.value.count, localTokenCount)
-                return charOffset + segment.value.prefix(localCharAdvance).utf16.count
+                let localUTF16Count = localTokenCount >= segment.length
+                    ? segment.value.utf16.count : segment.value.prefix(localTokenCount).utf16.count
+                return charOffset + localUTF16Count
             }
             tokenOffset = nextTokenOffset
             charOffset += segment.value.utf16.count
@@ -115,7 +115,7 @@ enum CompositionPresentationBuilder {
         focus: ComposedSegment?
     ) -> (text: String, focus: String?) {
         guard !segments.isEmpty else { return ("", nil) }
-        let parts = segments.map { segment -> String in
+        let parts = segments.lazy.map { segment -> String in
             guard let focus else { return segment.value }
             if segment.start == focus.start && segment.length == focus.length {
                 return "〔\(segment.value)〕"
@@ -182,7 +182,7 @@ enum CompositionPresentationBuilder {
             renderedFocus = focusedSegment(forInsertionIndex: insertionIndex, totalReadings: totalReadings, in: displayedSegments)
         }
         let debug = debugComposingText(segments: displayedSegments, focus: renderedFocus)
-        let markedText = displayedSegments.map(\.value).joined()
+        let markedText = displayedSegments.lazy.map(\.value).joined(separator: "")
         return CompositionPresentationState(
             baseSegments: baseSegments,
             displayedSegments: displayedSegments,

@@ -53,119 +53,65 @@ struct ListwiseFeatureEncoder {
         units: [CandidateUnit],
         context: CandidateSelectionContext
     ) -> ListwiseEncodedInput {
-        let limitedUnits = Array(units.prefix(ListwiseEncodedInput.maxCandidates))
-        var tokenIDs = Array(
-            repeating: TokenID.pad,
-            count: ListwiseEncodedInput.maxCandidates * ListwiseEncodedInput.sequenceLength
-        )
-        var tokenTypes = Array(
-            repeating: TokenType.pad,
-            count: ListwiseEncodedInput.maxCandidates * ListwiseEncodedInput.sequenceLength
-        )
-        var numericFeatures = Array(
-            repeating: Float(0),
-            count: ListwiseEncodedInput.maxCandidates * ListwiseEncodedInput.numericDimension
-        )
-        var candidateMask = Array(
-            repeating: Float(0),
-            count: ListwiseEncodedInput.maxCandidates
-        )
+        var tokenIDs = Array(repeating: TokenID.pad,
+            count: ListwiseEncodedInput.maxCandidates * ListwiseEncodedInput.sequenceLength)
+        var tokenTypes = Array(repeating: TokenType.pad, count: tokenIDs.count)
+        var numericFeatures = Array(repeating: Float(0),
+            count: ListwiseEncodedInput.maxCandidates * ListwiseEncodedInput.numericDimension)
+        var candidateMask = Array(repeating: Float(0), count: ListwiseEncodedInput.maxCandidates)
+        guard !units.isEmpty else {
+            return ListwiseEncodedInput(tokenIDs: tokenIDs, tokenTypes: tokenTypes,
+                numericFeatures: numericFeatures, candidateMask: candidateMask)
+        }
 
-        for (candidateIndex, unit) in limitedUnits.enumerated() {
-            let sequence = encodeSequence(unit: unit, context: context)
-            let sequenceOffset = candidateIndex * ListwiseEncodedInput.sequenceLength
-            tokenIDs.replaceSubrange(
-                sequenceOffset..<(sequenceOffset + ListwiseEncodedInput.sequenceLength),
-                with: sequence.ids
-            )
-            tokenTypes.replaceSubrange(
-                sequenceOffset..<(sequenceOffset + ListwiseEncodedInput.sequenceLength),
-                with: sequence.types
-            )
-            let features = encodeNumericFeatures(unit: unit, context: context)
+        // 同組候選共用上下文；每個字元只雜湊一次，直接填入最終張量。
+        let leftText = context.precedingValues.joined()
+        let left = leftText.unicodeScalars.suffix(14).map(characterID)
+        let reading = context.combinedToken.unicodeScalars.prefix(12).map(characterID)
+        let right = context.followingTokens.lazy.map(\.rawValue).joined(separator: "")
+            .unicodeScalars.prefix(8).map(characterID)
+        let precedingLength = Float(min(leftText.unicodeScalars.count, 24)) / 24
+        let followingLength = Float(min(context.followingTokens.count, 12)) / 12
+
+        for (candidateIndex, unit) in units.prefix(ListwiseEncodedInput.maxCandidates).enumerated() {
+            var offset = candidateIndex * ListwiseEncodedInput.sequenceLength
+            func append(_ id: Int32, type: Int32 = TokenType.special) {
+                tokenIDs[offset] = id
+                tokenTypes[offset] = type
+                offset += 1
+            }
+            append(TokenID.beginning)
+            append(TokenID.left)
+            for id in left { append(id, type: TokenType.left) }
+            append(TokenID.candidate)
+            var scalarCount = 0
+            var hanCount = 0
+            var latinCount = 0
+            for scalar in unit.surface.unicodeScalars {
+                if scalarCount < 8 { append(characterID(for: scalar), type: TokenType.candidate) }
+                scalarCount += 1
+                if Self.isHan(scalar) { hanCount += 1 }
+                if scalar.value < 128 && scalar.properties.isAlphabetic { latinCount += 1 }
+            }
+            append(TokenID.reading)
+            for id in reading { append(id, type: TokenType.reading) }
+            append(TokenID.right)
+            for id in right { append(id, type: TokenType.right) }
+            append(TokenID.end)
+            // 6 個特殊符號 + 14 / 8 / 12 / 8 字元，最多恰好 48 格。
             let numericOffset = candidateIndex * ListwiseEncodedInput.numericDimension
-            numericFeatures.replaceSubrange(
-                numericOffset..<(numericOffset + ListwiseEncodedInput.numericDimension),
-                with: features
-            )
+            numericFeatures[numericOffset] = Float(min(max(unit.baseRank, 0), 19)) / 19
+            numericFeatures[numericOffset + 1] = Float(min(max(unit.spanLength, 1), 8)) / 8
+            numericFeatures[numericOffset + 2] = Float(min(scalarCount, 8)) / 8
+            numericFeatures[numericOffset + 3] = precedingLength
+            numericFeatures[numericOffset + 4] = followingLength
+            numericFeatures[numericOffset + 5] = Float(hanCount) / Float(max(1, scalarCount))
+            numericFeatures[numericOffset + 6] = Float(latinCount) / Float(max(1, scalarCount))
+            numericFeatures[numericOffset + 7] = unit.languageID == "zh-Hant" ? 1 : 0
             candidateMask[candidateIndex] = 1
         }
-
-        return ListwiseEncodedInput(
-            tokenIDs: tokenIDs,
-            tokenTypes: tokenTypes,
-            numericFeatures: numericFeatures,
-            candidateMask: candidateMask
-        )
-    }
-
-    private func encodeSequence(
-        unit: CandidateUnit,
-        context: CandidateSelectionContext
-    ) -> (ids: [Int32], types: [Int32]) {
-        let left = Array(context.precedingValues.joined().unicodeScalars.suffix(14))
-        let candidate = Array(unit.surface.unicodeScalars.prefix(8))
-        let reading = Array(context.combinedToken.unicodeScalars.prefix(12))
-        let rightText = context.followingTokens.map(\.rawValue).joined()
-        let right = Array(rightText.unicodeScalars.prefix(8))
-        var ids: [Int32] = [TokenID.beginning, TokenID.left]
-        var types: [Int32] = [TokenType.special, TokenType.special]
-
-        func append(_ scalars: [UnicodeScalar], type: Int32) {
-            for scalar in scalars {
-                ids.append(characterID(for: scalar))
-                types.append(type)
-            }
-        }
-
-        append(left, type: TokenType.left)
-        ids.append(TokenID.candidate)
-        types.append(TokenType.special)
-        append(candidate, type: TokenType.candidate)
-        ids.append(TokenID.reading)
-        types.append(TokenType.special)
-        append(reading, type: TokenType.reading)
-        ids.append(TokenID.right)
-        types.append(TokenType.special)
-        append(right, type: TokenType.right)
-        ids.append(TokenID.end)
-        types.append(TokenType.special)
-
-        if ids.count > ListwiseEncodedInput.sequenceLength {
-            ids = Array(ids.prefix(ListwiseEncodedInput.sequenceLength))
-            types = Array(types.prefix(ListwiseEncodedInput.sequenceLength))
-            ids[ids.count - 1] = TokenID.end
-            types[types.count - 1] = TokenType.special
-        }
-        if ids.count < ListwiseEncodedInput.sequenceLength {
-            let padding = ListwiseEncodedInput.sequenceLength - ids.count
-            ids.append(contentsOf: repeatElement(TokenID.pad, count: padding))
-            types.append(contentsOf: repeatElement(TokenType.pad, count: padding))
-        }
-        return (ids, types)
-    }
-
-    private func encodeNumericFeatures(
-        unit: CandidateUnit,
-        context: CandidateSelectionContext
-    ) -> [Float] {
-        let surfaceScalars = Array(unit.surface.unicodeScalars)
-        let precedingLength = context.precedingValues.joined().unicodeScalars.count
-        let scalarCount = max(1, surfaceScalars.count)
-        let hanCount = surfaceScalars.filter(Self.isHan).count
-        let latinCount = surfaceScalars.filter {
-            $0.value < 128 && $0.properties.isAlphabetic
-        }.count
-        return [
-            Float(min(max(unit.baseRank, 0), 19)) / 19,
-            Float(min(max(unit.spanLength, 1), 8)) / 8,
-            Float(min(surfaceScalars.count, 8)) / 8,
-            Float(min(precedingLength, 24)) / 24,
-            Float(min(context.followingTokens.count, 12)) / 12,
-            Float(hanCount) / Float(scalarCount),
-            Float(latinCount) / Float(scalarCount),
-            unit.languageID == "zh-Hant" ? 1 : 0,
-        ]
+        return ListwiseEncodedInput(tokenIDs: tokenIDs, tokenTypes: tokenTypes,
+            numericFeatures: numericFeatures, candidateMask: candidateMask)
     }
 
     private func characterID(for scalar: UnicodeScalar) -> Int32 {
