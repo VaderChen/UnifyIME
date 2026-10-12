@@ -17,6 +17,8 @@ ditto "$APP" "$INSTALL"
 
 echo "Refreshing registration..."
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$INSTALL"
+source "$ROOT/scripts/ime_cache_common.sh"
+clear_stale_input_source_caches "$INSTALL"
 killall UnifyIME >/dev/null 2>&1 || true
 killall "快捷中文測試" >/dev/null 2>&1 || true
 killall TextInputMenuAgent >/dev/null 2>&1 || true
